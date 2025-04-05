@@ -36,8 +36,8 @@ func DefaultConfig() *Config {
 		UseMainnet:       true,
 		OrderBookDepth:   5,
 		MaxStaleDuration: 2 * time.Second,
-		UpdateUIInterval: 250 * time.Millisecond,
 		InitialWaitTime:  2 * time.Second,
+		UpdateUIInterval: 250 * time.Millisecond,
 	}
 }
 

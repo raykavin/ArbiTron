@@ -1,17 +1,22 @@
 // internal/exchange/exchange.go
 package exchange
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Exchange interface {
 	Connect(ctx context.Context) error
-	SubscribeToOrderBook(coin string) error
-	GetOrderBook(coin string) (OrderBook, error)
+	SubscribeToOrderBook(symbol string) error
+	GetOrderBook(symbol string) (*OrderBook, error)
+	GetName() string
 }
 
 type OrderBook struct {
-	Bids []Order
-	Asks []Order
+	Bids      []Order
+	Asks      []Order
+	Timestamp time.Time
 }
 
 type Order struct {

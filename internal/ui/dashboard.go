@@ -36,15 +36,17 @@ const (
 
 // CoinData represents a single arbitrage opportunity data point
 type CoinData struct {
-	Timestamp    time.Time
-	Symbol       string
-	BuyExchange  string
-	SellExchange string
-	BuyPrice     float64
-	SellPrice    float64
-	Profit       float64
-	Spread       float64
-	LiquidProfit float64
+	Timestamp       time.Time
+	Symbol          string
+	BuyExchange     string
+	SellExchange    string
+	BuyPrice        float64
+	SellPrice       float64
+	Profit          float64
+	Spread          float64
+	MaxTradeSize    float64
+	PotentialProfit float64
+	LiquidProfit    float64
 }
 
 // ArbitrageDashboard manages the UI and data for crypto arbitrage visualization
@@ -55,7 +57,7 @@ type ArbitrageDashboard struct {
 	lineChart    *linechart.LineChart
 	chartButtons map[string]*button.Button
 
-	// Data channels
+	// Data channels - aumentado o buffer para reduzir bloqueios
 	updateChan chan CoinData
 	closeChan  chan struct{}
 
@@ -67,8 +69,11 @@ type ArbitrageDashboard struct {
 	selectedCoin   string
 	mode           ChartMode
 
-	// Synchronization
-	mu sync.RWMutex
+	// Sincronização explícita para updates e redrawing
+	dataMu      sync.RWMutex // para proteção de dados
+	widgetMu    sync.Mutex   // para proteção de widgets
+	updating    bool         // sinaliza que uma atualização está em andamento
+	batchUpdate bool         // indica se estamos em modo de atualização em lote
 }
 
 // NewArbitrageDashboard creates a new dashboard instance for the given coins
@@ -84,13 +89,14 @@ func NewArbitrageDashboard(coins []string) *ArbitrageDashboard {
 	return &ArbitrageDashboard{
 		coins:          coins,
 		chartColors:    chartColors,
+		updateChan:     make(chan CoinData, 1000),
 		coinWidgets:    make(map[string]*text.Text),
 		chartButtons:   make(map[string]*button.Button),
-		updateChan:     make(chan CoinData, 100),
 		closeChan:      make(chan struct{}),
 		spreadsHistory: make(map[string][]float64),
 		profits:        make(map[string]float64),
 		mode:           ModeAll,
+		batchUpdate:    false,
 	}
 }
 
@@ -159,9 +165,12 @@ func (ad *ArbitrageDashboard) initLineChart() error {
 func (ad *ArbitrageDashboard) initChartButtons() error {
 	// "All Coins" button
 	allButton, err := button.New("Todas as moedas", func() error {
-		ad.mu.Lock()
+		ad.dataMu.Lock()
 		ad.mode = ModeAll
-		ad.mu.Unlock()
+		ad.dataMu.Unlock()
+
+		// Agenda uma atualização dos gráficos para os dados atuais
+		ad.scheduleUIUpdate()
 		return nil
 	},
 		button.WidthFor("Todas as moedas"),
@@ -177,10 +186,13 @@ func (ad *ArbitrageDashboard) initChartButtons() error {
 	for _, coin := range ad.coins {
 		coinCopy := coin // Create a copy to avoid closure capture issues
 		btn, err := button.New(coinCopy, func() error {
-			ad.mu.Lock()
+			ad.dataMu.Lock()
 			ad.mode = ModeSingle
 			ad.selectedCoin = coinCopy
-			ad.mu.Unlock()
+			ad.dataMu.Unlock()
+
+			// Agenda uma atualização dos gráficos para os dados atuais
+			ad.scheduleUIUpdate()
 			return nil
 		},
 			button.WidthFor(coinCopy),
@@ -196,16 +208,76 @@ func (ad *ArbitrageDashboard) initChartButtons() error {
 	return nil
 }
 
-// ProcessCoinUpdate handles new coin data updates
-func (ad *ArbitrageDashboard) processCoinUpdate(coinData CoinData) {
-	ad.mu.Lock()
-	defer ad.mu.Unlock()
+// scheduleUIUpdate agenda uma atualização da UI para acontecer em um goroutine separado
+func (ad *ArbitrageDashboard) scheduleUIUpdate() {
+	go func() {
+		// Pequena pausa para permitir agrupamento de updates
+		time.Sleep(50 * time.Millisecond)
 
-	ad.updateCoinWidget(coinData)
+		ad.dataMu.RLock()
+		defer ad.dataMu.RUnlock()
+
+		ad.widgetMu.Lock()
+		defer ad.widgetMu.Unlock()
+
+		if !ad.updating {
+			ad.updating = true
+			defer func() { ad.updating = false }()
+
+			ad.updateBarChart()
+			ad.updateLineChart()
+		}
+	}()
+}
+
+// processCoinUpdate handles new coin data updates with improved synchronization
+// processCoinUpdate handles new coin data updates with improved synchronization
+func (ad *ArbitrageDashboard) processCoinUpdate(coinData CoinData) {
+	ad.dataMu.Lock()
+	// Update internal data
 	ad.updateProfitData(coinData)
 	ad.updateSpreadHistory(coinData)
-	ad.updateBarChart()
-	ad.updateLineChart()
+	ad.dataMu.Unlock()
+
+	// Update widgets with clear locking pattern
+	ad.widgetMu.Lock()
+	ad.updateCoinWidget(coinData)
+	ad.widgetMu.Unlock()
+
+	// Schedule UI update after a short delay to batch updates
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		ad.widgetMu.Lock()
+		if !ad.updating {
+			ad.updating = true
+			ad.updateBarChart()
+			ad.updateLineChart()
+			ad.updating = false
+		}
+		ad.widgetMu.Unlock()
+	}()
+}
+
+// StartBatchUpdates inicia um modo de atualizações em lote para maior eficiência
+func (ad *ArbitrageDashboard) StartBatchUpdates() {
+	ad.widgetMu.Lock()
+	ad.batchUpdate = true
+	ad.widgetMu.Unlock()
+}
+
+// EndBatchUpdates termina o modo de atualizações em lote e atualiza todos os gráficos
+func (ad *ArbitrageDashboard) EndBatchUpdates() {
+	ad.widgetMu.Lock()
+	defer ad.widgetMu.Unlock()
+
+	ad.batchUpdate = false
+
+	if !ad.updating {
+		ad.updating = true
+		ad.updateBarChart()
+		ad.updateLineChart()
+		ad.updating = false
+	}
 }
 
 // updateCoinWidget updates the text widget for a specific coin
@@ -227,15 +299,20 @@ Preço:           $%.7f
 Spread:          %.7f%%
 Lucro Bruto:     %.7f%%
 Lucro Liquido:   %.7f%%
+Vol. Máximo:     %.6f %s
+Lucro Potencial: $%.2f
 Horário          %s
 `,
 		coinData.BuyExchange,
 		coinData.BuyPrice,
 		coinData.SellExchange,
 		coinData.SellPrice,
-		coinData.Profit,
 		coinData.Spread,
+		coinData.Profit,
 		coinData.LiquidProfit,
+		coinData.MaxTradeSize,
+		coinData.Symbol,
+		coinData.PotentialProfit,
 		coinData.Timestamp.Format("15:04:05"),
 	)
 
@@ -245,7 +322,7 @@ Horário          %s
 
 // updateProfitData updates the profit data for a specific coin
 func (ad *ArbitrageDashboard) updateProfitData(coinData CoinData) {
-	ad.profits[coinData.Symbol] = coinData.Profit
+	ad.profits[coinData.Symbol] = 100
 }
 
 // updateSpreadHistory updates the spread history for a specific coin
@@ -261,17 +338,19 @@ func (ad *ArbitrageDashboard) updateSpreadHistory(coinData CoinData) {
 func (ad *ArbitrageDashboard) updateBarChart() {
 	barData := make([]int, len(ad.coins))
 	for i, coin := range ad.coins {
-		barData[i] = int(math.Abs(ad.profits[coin]) * 20000)
+		profit, exists := ad.profits[coin]
+		if exists {
+			barData[i] = int(math.Abs(profit) * 20000)
+		}
 	}
-	ad.barChart.Values(barData, 1000)
+	_ = ad.barChart.Values(barData, 1000)
 }
 
 // updateLineChart updates the line chart based on current mode
 func (ad *ArbitrageDashboard) updateLineChart() {
-	// Clear existing series
 	ad.lineChart.Series("", []float64{}, linechart.SeriesCellOpts(cell.FgColor(cell.ColorDefault)))
 
-	// Clear all coin series to ensure full cleanup
+	// Clears all coin series to ensure complete cleaning
 	for _, coin := range ad.coins {
 		ad.lineChart.Series(coin, []float64{}, linechart.SeriesCellOpts(cell.FgColor(cell.ColorDefault)))
 	}
@@ -288,6 +367,7 @@ func (ad *ArbitrageDashboard) updateLineChart() {
 func (ad *ArbitrageDashboard) renderAllCoinsChart() {
 	for i, coin := range ad.coins {
 		if spreads, ok := ad.spreadsHistory[coin]; ok && len(spreads) > 0 {
+			// Ignora erros de atualização
 			ad.lineChart.Series(coin,
 				spreads,
 				linechart.SeriesCellOpts(cell.FgColor(ad.chartColors[i%len(ad.chartColors)])),
@@ -306,7 +386,8 @@ func (ad *ArbitrageDashboard) renderSingleCoinChart() {
 				break
 			}
 		}
-		ad.lineChart.Series(
+
+		_ = ad.lineChart.Series(
 			ad.selectedCoin,
 			spreads,
 			linechart.SeriesCellOpts(cell.FgColor(ad.chartColors[colorIdx%len(ad.chartColors)])),
@@ -317,12 +398,30 @@ func (ad *ArbitrageDashboard) renderSingleCoinChart() {
 // StartUpdateListener starts the goroutine for processing coin updates
 func (ad *ArbitrageDashboard) StartUpdateListener(ctx context.Context) {
 	go func() {
+		// Buffer de atualização para evitar sobrecarga da UI
+		updateBuffer := make([]CoinData, 0, 10)
+		updateTicker := time.NewTicker(200 * time.Millisecond)
+		defer updateTicker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case coinData := <-ad.updateChan:
-				ad.processCoinUpdate(coinData)
+				updateBuffer = append(updateBuffer, coinData)
+
+			case <-updateTicker.C:
+				if len(updateBuffer) > 0 {
+					ad.StartBatchUpdates()
+
+					for _, data := range updateBuffer {
+						ad.processCoinUpdate(data)
+					}
+
+					updateBuffer = updateBuffer[:0]
+					ad.EndBatchUpdates()
+				}
+
 			case <-ad.closeChan:
 				return
 			}
@@ -341,7 +440,7 @@ func (ad *ArbitrageDashboard) SendCoinData(data CoinData) {
 	case ad.updateChan <- data:
 		// Data sent successfully
 	default:
-		// Channel buffer full
+		// Channel buffer full, prevent lock
 	}
 }
 
@@ -353,10 +452,10 @@ func (ad *ArbitrageDashboard) CreateLayout() ([]container.Option, error) {
 	buttonElements := ad.createButtonElements()
 
 	builder.Add(
-		grid.RowHeightPerc(30,
+		grid.RowHeightPerc(38,
 			ad.createCoinWidgetsRow()...,
 		),
-		grid.RowHeightPerc(65,
+		grid.RowHeightPerc(62,
 			grid.ColWidthPerc(50,
 				grid.Widget(ad.barChart,
 					container.Border(linestyle.Light),
@@ -367,10 +466,10 @@ func (ad *ArbitrageDashboard) CreateLayout() ([]container.Option, error) {
 				grid.RowHeightPerc(15,
 					buttonElements...,
 				),
-				grid.RowHeightPerc(85,
+				grid.RowHeightPerc(82,
 					grid.Widget(ad.lineChart,
 						container.Border(linestyle.Light),
-						container.BorderTitle(" Histórico de spread da arbitragem "),
+						container.BorderTitle(" Histórico de spread "),
 					),
 				),
 			),
@@ -449,9 +548,6 @@ func RunDashboard(ctx context.Context, ad *ArbitrageDashboard) error {
 	dashCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer ad.Close()
-
-	// Start the update listener
-	ad.StartUpdateListener(dashCtx)
 
 	return termdash.Run(dashCtx, t, c, termdash.RedrawInterval(redrawInterval))
 }

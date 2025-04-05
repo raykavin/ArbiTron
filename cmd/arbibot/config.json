@@ -1,17 +1,17 @@
 {
   "coins": [
-    "LINK",
-    "ATOM",
-    "BTC",
-    "AVAX",
-    "ADA"
+    "CFX",
+    "POPCAT",
+    "VINE",
+    "PURR",
+    "GOAT"
   ],
-  "profit_threshold": 1,
-  "min_profit_usd": 5,
   "trade_fees": {
     "Hyperliquid": 0.1,
     "KuCoin": 0.1
   },
+  "profit_threshold": 1,
+  "min_profit_usd": 5,
   "check_interval": 400000000,
   "use_mainnet": true,
   "order_book_depth": 5,

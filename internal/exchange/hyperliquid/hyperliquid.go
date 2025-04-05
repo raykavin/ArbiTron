@@ -75,8 +75,8 @@ type WsBook struct {
 
 // OrderBookData stores an order book with its timestamp
 type OrderBookData struct {
-	Timestamp time.Time
-	Book      exchange.OrderBook
+	// Timestamp time.Time
+	Book exchange.OrderBook
 }
 
 // HyperliquidWS handles WebSocket communication with Hyperliquid
@@ -106,6 +106,10 @@ func NewHyperliquidWS(mainnet bool) *HyperliquidWS {
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+}
+
+func (h *HyperliquidWS) GetName() string {
+	return "Hyperliquid"
 }
 
 // Connect establishes a WebSocket connection to Hyperliquid
@@ -151,30 +155,30 @@ func (h *HyperliquidWS) SubscribeToOrderBook(coin string) error {
 
 	// Initialize the order book for this coin
 	h.orderBooks[coin] = &OrderBookData{
-		Timestamp: time.Time{},
-		Book:      exchange.OrderBook{},
+		// Timestamp: time.Time{},
+		Book: exchange.OrderBook{},
 	}
 
 	return h.conn.WriteJSON(subscription)
 }
 
 // GetOrderBook retrieves the current order book for a coin
-func (h *HyperliquidWS) GetOrderBook(coin string) (exchange.OrderBook, error) {
+func (h *HyperliquidWS) GetOrderBook(coin string) (*exchange.OrderBook, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	orderBookData, exists := h.orderBooks[coin]
 	if !exists {
-		return exchange.OrderBook{}, fmt.Errorf("no order book for %s", coin)
+		return nil, fmt.Errorf("no order book for %s", coin)
 	}
 
 	// Check if data is stale
-	if time.Since(orderBookData.Timestamp) > staleDuration {
-		return exchange.OrderBook{}, fmt.Errorf("stale order book for %s (last updated %s ago)",
-			coin, time.Since(orderBookData.Timestamp).String())
+	if time.Since(orderBookData.Book.Timestamp) > staleDuration {
+		return nil, fmt.Errorf("stale order book for %s (last updated %s ago)",
+			coin, time.Since(orderBookData.Book.Timestamp).String())
 	}
 
-	return orderBookData.Book, nil
+	return &orderBookData.Book, nil
 }
 
 // handleMessages processes incoming WebSocket messages
@@ -202,7 +206,6 @@ func (h *HyperliquidWS) handleMessages(ctx context.Context) {
 			case channelL2Book:
 				h.handleOrderBookUpdate(response.Data)
 			default:
-				log.Printf("Unhandled channel: %s", response.Channel)
 			}
 		}
 	}
@@ -222,15 +225,15 @@ func (h *HyperliquidWS) handleOrderBookUpdate(data []byte) {
 	coin := orderbook.Coin
 	if _, exists := h.orderBooks[coin]; !exists {
 		h.orderBooks[coin] = &OrderBookData{
-			Book:      exchange.OrderBook{},
-			Timestamp: time.Time{},
+			Book: exchange.OrderBook{},
+			// Timestamp: time.Time{},
 		}
 	}
 
 	newBook := h.processOrderBookLevels(orderbook)
 
+	newBook.Timestamp = time.Now()
 	h.orderBooks[coin].Book = newBook
-	h.orderBooks[coin].Timestamp = time.Now()
 }
 
 // processOrderBookLevels converts the raw order book data to our internal format

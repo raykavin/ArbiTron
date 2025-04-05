@@ -61,6 +61,10 @@ func NewKuCoinWS(tokenResp *TokenResponse) *KuCoinWS {
 	}
 }
 
+func (k *KuCoinWS) GetName() string {
+	return "KuCoin"
+}
+
 // Connect establishes a WebSocket connection to KuCoin
 func (k *KuCoinWS) Connect(ctx context.Context) error {
 	if err := k.dial(ctx); err != nil {
@@ -128,22 +132,22 @@ func (k *KuCoinWS) SubscribeToOrderBook(coin string) error {
 }
 
 // GetOrderBook retrieves the current order book for a specific coin
-func (k *KuCoinWS) GetOrderBook(coin string) (exchange.OrderBook, error) {
+func (k *KuCoinWS) GetOrderBook(coin string) (*exchange.OrderBook, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
 	entry, exists := k.orderBooks[coin]
 	if !exists {
-		return exchange.OrderBook{}, fmt.Errorf("no order book available for %s", coin)
+		return nil, fmt.Errorf("no order book available for %s", coin)
 	}
 
 	// Check if data is stale
 	if entry.Timestamp.IsZero() || time.Since(entry.Timestamp) > k.maxStaleData {
-		return exchange.OrderBook{}, fmt.Errorf("stale order book data for %s (last update: %v)",
+		return nil, fmt.Errorf("stale order book data for %s (last update: %v)",
 			coin, entry.Timestamp)
 	}
 
-	return entry.Book, nil
+	return &entry.Book, nil
 }
 
 // Close properly closes the WebSocket connection
