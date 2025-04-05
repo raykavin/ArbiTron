@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"notlelouch/ArbiBot/internal/exchange"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/raykavin/ArbiTron/internal/exchange"
 
 	"github.com/gorilla/websocket"
 )

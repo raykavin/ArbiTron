@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"notlelouch/ArbiBot/internal/arbitrage"
-	"notlelouch/ArbiBot/internal/config"
+	"github.com/raykavin/ArbiTron/internal/arbitrage"
+	"github.com/raykavin/ArbiTron/internal/config"
 )
 
 type ProfitRecord struct {

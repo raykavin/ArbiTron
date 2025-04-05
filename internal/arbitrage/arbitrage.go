@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"notlelouch/ArbiBot/internal/config"
-	"notlelouch/ArbiBot/internal/exchange"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/raykavin/ArbiTron/internal/config"
+	"github.com/raykavin/ArbiTron/internal/exchange"
 )
 
 var strBuilder strings.Builder
@@ -140,60 +141,67 @@ func FindArbitrageOpportunities(exchanges []exchange.Exchange, cfg *config.Confi
 	var opportunities []ArbitrageOpportunity
 
 	for _, coin := range cfg.Coins {
-		lowestAsk, highestBid, err := FindBestPrices(exchanges, coin, cfg.OrderBookDepth, cfg.MaxStaleDuration)
-		if err != nil {
-			continue
+		for _, buyEx := range exchanges {
+			for _, sellEx := range exchanges {
+				if buyEx == sellEx {
+					continue // evita mesma corretora
+				}
+
+				// Obter books
+				buyBook, err := buyEx.GetOrderBook(coin)
+				if err != nil || len(buyBook.Asks) == 0 {
+					continue
+				}
+
+				sellBook, err := sellEx.GetOrderBook(coin)
+				if err != nil || len(sellBook.Bids) == 0 {
+					continue
+				}
+
+				lowestAsk := buyBook.Asks[0]
+				highestBid := sellBook.Bids[0]
+
+				if highestBid.Price <= lowestAsk.Price {
+					continue
+				}
+
+				netProfit := CalculateNetProfitPercentage(
+					cfg,
+					lowestAsk.Price,
+					highestBid.Price,
+					buyEx.GetName(),
+					sellEx.GetName(),
+				)
+
+				if netProfit <= cfg.MinProfitPercentage {
+					continue
+				}
+
+				spread := CalculateSpreadPercentage(lowestAsk.Price, highestBid.Price)
+				maxTradeSize := CalculateMaxTradeSize(lowestAsk, highestBid)
+				potentialProfit := CalculatePotentialProfit(lowestAsk.Price, maxTradeSize, netProfit)
+
+				if potentialProfit < cfg.MinProfitAmount {
+					continue
+				}
+
+				opportunity := ArbitrageOpportunity{
+					Symbol:          coin,
+					BuyExchange:     buyEx.GetName(),
+					SellExchange:    sellEx.GetName(),
+					BuyPrice:        lowestAsk.Price,
+					SellPrice:       highestBid.Price,
+					Spread:          spread,
+					NetProfit:       netProfit,
+					MaxTradeSize:    maxTradeSize,
+					PotentialProfit: potentialProfit,
+					Timestamp:       time.Now(),
+				}
+
+				LogPositiveOpportunity(opportunity)
+				opportunities = append(opportunities, opportunity)
+			}
 		}
-
-		// Skip if no valid arbitrage (sell price <= buy price)
-		if highestBid.Price <= lowestAsk.Price {
-			continue
-		}
-
-		// Calculate profit metrics
-		netProfit := CalculateNetProfitPercentage(
-			cfg,
-			lowestAsk.Price,
-			highestBid.Price,
-			lowestAsk.Exchange,
-			highestBid.Exchange,
-		)
-
-		// Skip if profit below threshold
-		if netProfit <= cfg.MinProfitPercentage {
-			continue
-		}
-
-		// Calculate additional metrics
-		spread := CalculateSpreadPercentage(lowestAsk.Price, highestBid.Price)
-		maxTradeSize := CalculateMaxTradeSize(lowestAsk, highestBid)
-		potentialProfit := CalculatePotentialProfit(lowestAsk.Price, maxTradeSize, netProfit)
-
-		// Skip if potential profit too small
-		if potentialProfit < cfg.MinProfitAmount {
-			continue
-		}
-
-		// Create opportunity object
-		opportunity := ArbitrageOpportunity{
-			Symbol:          coin,
-			BuyExchange:     lowestAsk.Exchange,
-			SellExchange:    highestBid.Exchange,
-			BuyPrice:        lowestAsk.Price,
-			SellPrice:       highestBid.Price,
-			Spread:          spread,
-			NetProfit:       netProfit,
-			MaxTradeSize:    maxTradeSize,
-			PotentialProfit: potentialProfit,
-			Timestamp:       time.Now(),
-		}
-
-		// Log profitable opportunities
-		if netProfit > 0 {
-			LogPositiveOpportunity(opportunity)
-		}
-
-		opportunities = append(opportunities, opportunity)
 	}
 
 	return opportunities, nil

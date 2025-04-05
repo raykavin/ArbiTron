@@ -147,22 +147,22 @@ func (dw *dashboardWidgets) updateCoinWidget(coinData CoinData) {
 		return
 	}
 
-	fmt.Fprintln(&strBuilder, "BUY:")
-	fmt.Fprintf(&strBuilder, "Exchange:        %s\n", coinData.BuyExchange)
-	fmt.Fprintf(&strBuilder, "Price:           $%.7f\n", coinData.BuyPrice)
+	fmt.Fprintf(&strBuilder, "%-16s\n", "BUY:")
+	fmt.Fprintf(&strBuilder, "%-16s %-16s\n", "Exchange:", coinData.BuyExchange)
+
+	fmt.Fprintf(&strBuilder, "%-16s $%.7f\n", "Price:", coinData.BuyPrice)
+	fmt.Fprintln(&strBuilder, strings.Repeat("-", 33))
+	fmt.Fprintf(&strBuilder, "%-16s\n", "SELL:")
+	fmt.Fprintf(&strBuilder, "%-16s %s\n", "Exchange:", coinData.SellExchange)
+	fmt.Fprintf(&strBuilder, "%-16s $%.7f\n", "Price:", coinData.SellPrice)
 	fmt.Fprintln(&strBuilder, strings.Repeat("-", 33))
 
-	fmt.Fprintln(&strBuilder, "SELL:")
-	fmt.Fprintf(&strBuilder, "Exchange:        %s\n", coinData.SellExchange)
-	fmt.Fprintf(&strBuilder, "Price:           $%.7f\n", coinData.SellPrice)
-	fmt.Fprintln(&strBuilder, strings.Repeat("-", 33))
-
-	fmt.Fprintf(&strBuilder, "Spread:          %.7f%%\n", coinData.Spread)
-	fmt.Fprintf(&strBuilder, "Gross Profit:    %.7f%%\n", coinData.Profit)
-	fmt.Fprintf(&strBuilder, "Net Profit:      %.7f%%\n", coinData.LiquidProfit)
-	fmt.Fprintf(&strBuilder, "Max Volume:      %.6f %s\n", coinData.MaxTradeSize, coinData.Symbol)
-	fmt.Fprintf(&strBuilder, "Pot. Profit:     $%.2f\n", coinData.PotentialProfit)
-	fmt.Fprintf(&strBuilder, "Timestamp:       %s\n", coinData.Timestamp.Format("15:04:05"))
+	fmt.Fprintf(&strBuilder, "%-16s %.7f%%\n", "Spread:", coinData.Spread)
+	fmt.Fprintf(&strBuilder, "%-16s %.7f%%\n", "Gross Profit:", coinData.Profit)
+	fmt.Fprintf(&strBuilder, "%-16s %.7f%%\n", "Net Profit:", coinData.LiquidProfit)
+	fmt.Fprintf(&strBuilder, "%-16s %.6f %s\n", "Max Volume:", coinData.MaxTradeSize, coinData.Symbol)
+	fmt.Fprintf(&strBuilder, "%-16s $%.2f\n", "Pot. Profit:", coinData.PotentialProfit)
+	fmt.Fprintf(&strBuilder, "%-16s %s\n", "Timestamp:", coinData.Timestamp.Format("15:04:05"))
 
 	widgetText := strBuilder.String()
 

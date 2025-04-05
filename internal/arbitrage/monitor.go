@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"notlelouch/ArbiBot/internal/config"
-	"notlelouch/ArbiBot/internal/exchange"
-	"notlelouch/ArbiBot/internal/exchange/hyperliquid"
-	"notlelouch/ArbiBot/internal/exchange/kucoin"
-	"notlelouch/ArbiBot/internal/ui"
+	"github.com/raykavin/ArbiTron/internal/config"
+	"github.com/raykavin/ArbiTron/internal/exchange"
+	"github.com/raykavin/ArbiTron/internal/exchange/hyperliquid"
+	"github.com/raykavin/ArbiTron/internal/exchange/kucoin"
+	"github.com/raykavin/ArbiTron/internal/ui"
 )
 
 // ArbitrageMonitor handles the monitoring of arbitrage opportunities
@@ -92,7 +92,8 @@ func (am *ArbitrageMonitor) subscribeToCoins() error {
 func (am *ArbitrageMonitor) verifyInitialData() error {
 	opportunities, err := FindArbitrageOpportunities(am.exchangeClients, am.config)
 	if err != nil {
-		log.Printf("Error finding initial arbitrage opportunities: %v", err)
+		// log.Printf("Error finding initial arbitrage opportunities: %v", err)
+		return nil
 	}
 
 	am.logInitialOpportunities(opportunities)
@@ -208,7 +209,7 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 	)
 
 	if err != nil {
-		log.Printf("Error finding best prices for %s: %v\n", symbol, err)
+		// log.Printf("Error finding best prices for %s: %v\n", symbol, err)
 		return
 	}
 

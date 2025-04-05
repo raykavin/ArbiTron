@@ -4,12 +4,13 @@ import (
 	"context"
 	"flag"
 	"log"
-	"notlelouch/ArbiBot/internal/arbitrage"
-	"notlelouch/ArbiBot/internal/config"
-	"notlelouch/ArbiBot/internal/ui"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/raykavin/ArbiTron/internal/arbitrage"
+	"github.com/raykavin/ArbiTron/internal/config"
+	"github.com/raykavin/ArbiTron/internal/ui"
 )
 
 func main() {
