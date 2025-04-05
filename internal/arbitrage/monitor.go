@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime"
+	"sync"
+	"time"
+
 	"notlelouch/ArbiBot/internal/config"
 	"notlelouch/ArbiBot/internal/exchange"
 	"notlelouch/ArbiBot/internal/exchange/hyperliquid"
 	"notlelouch/ArbiBot/internal/exchange/kucoin"
 	"notlelouch/ArbiBot/internal/ui"
-	"runtime"
-	"sync"
-	"time"
 )
 
 // ArbitrageMonitor handles the monitoring of arbitrage opportunities
@@ -24,7 +25,6 @@ type ArbitrageMonitor struct {
 
 // NewArbitrageMonitor creates and initializes a new ArbitrageMonitor
 func NewArbitrageMonitor(dashboard *ui.ArbitrageDashboard, cfg *config.Config) (*ArbitrageMonitor, error) {
-	// Get public token for KuCoin
 	tokenResp, err := kucoin.GetToken("", "", "", false)
 	if err != nil {
 		return nil, err
@@ -44,13 +44,24 @@ func NewArbitrageMonitor(dashboard *ui.ArbitrageDashboard, cfg *config.Config) (
 func (am *ArbitrageMonitor) Connect(ctx context.Context) error {
 	log.Println("Starting connections with exchanges...")
 
+	if err := am.connectToExchanges(ctx); err != nil {
+		return err
+	}
+
+	if err := am.subscribeToCoins(); err != nil {
+		return err
+	}
+
+	log.Println("Waiting for initial order book updates...")
+	time.Sleep(am.config.InitialWaitTime)
+
+	return am.verifyInitialData()
+}
+
+// connectToExchanges connects to all configured exchanges
+func (am *ArbitrageMonitor) connectToExchanges(ctx context.Context) error {
 	for i, client := range am.exchangeClients {
-		exchangeName := "unknown"
-		if i == 0 {
-			exchangeName = "Hyperliquid"
-		} else if i == 1 {
-			exchangeName = "KuCoin"
-		}
+		exchangeName := am.getExchangeName(i)
 
 		log.Printf("Connecting to %s...", exchangeName)
 		if err := client.Connect(ctx); err != nil {
@@ -58,38 +69,38 @@ func (am *ArbitrageMonitor) Connect(ctx context.Context) error {
 		}
 		log.Printf("Successfully connected to %s", exchangeName)
 	}
+	return nil
+}
 
-	// Subscribe to coins before starting monitoring
+// subscribeToCoins subscribes to order book updates for all configured coins
+func (am *ArbitrageMonitor) subscribeToCoins() error {
 	for _, coin := range am.config.Coins {
 		for i, client := range am.exchangeClients {
-			exchangeName := "unknown"
-			if i == 0 {
-				exchangeName = "Hyperliquid"
-			} else if i == 1 {
-				exchangeName = "KuCoin"
-			}
+			exchangeName := am.getExchangeName(i)
 
 			log.Printf("Subscribing to %s on %s...", coin, exchangeName)
 			if err := client.SubscribeToOrderBook(coin); err != nil {
 				log.Printf("Error subscribing to %s on %s: %v",
 					coin, exchangeName, err)
-				continue
 			}
 		}
 	}
+	return nil
+}
 
-	log.Println("Waiting for initial order book updates...")
-
-	// Longer wait time to allow websocket connections
-	// to start receiving data before monitoring begins
-	time.Sleep(am.config.InitialWaitTime)
-
-	// Verify if we can get any data before proceeding
+// verifyInitialData checks if we can get initial data before proceeding
+func (am *ArbitrageMonitor) verifyInitialData() error {
 	opportunities, err := FindArbitrageOpportunities(am.exchangeClients, am.config)
 	if err != nil {
 		log.Printf("Error finding initial arbitrage opportunities: %v", err)
 	}
 
+	am.logInitialOpportunities(opportunities)
+	return am.verifyDataForEachCoin()
+}
+
+// logInitialOpportunities logs any initial arbitrage opportunities found
+func (am *ArbitrageMonitor) logInitialOpportunities(opportunities []ArbitrageOpportunity) {
 	if len(opportunities) > 0 {
 		log.Printf("Found %d initial arbitrage opportunities", len(opportunities))
 		for _, opp := range opportunities {
@@ -99,8 +110,11 @@ func (am *ArbitrageMonitor) Connect(ctx context.Context) error {
 	} else {
 		log.Println("No initial arbitrage opportunities found")
 	}
+}
 
-	// Para garantir que temos dados para todas as moedas, verificamos individualmente
+// verifyDataForEachCoin checks if we have data for each configured coin
+func (am *ArbitrageMonitor) verifyDataForEachCoin() error {
+	// To ensure we have data for all coins, we check each one individually
 	for _, coin := range am.config.Coins {
 		lowestAsk, highestBid, err := FindBestPrices(
 			am.exchangeClients,
@@ -116,7 +130,6 @@ func (am *ArbitrageMonitor) Connect(ctx context.Context) error {
 			log.Printf("Warning: No initial data yet for %s: %v", coin, err)
 		}
 	}
-
 	return nil
 }
 
@@ -186,7 +199,7 @@ func (am *ArbitrageMonitor) produceArbitrageOpportunities(ctx context.Context, a
 
 // checkArbitrageOpportunity looks for arbitrage opportunities for a symbol
 func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
-	// Primeiro, pegamos os preços básicos para garantir que temos dados para a UI
+	// First, get basic prices to ensure we have data for the UI
 	lowestAsk, highestBid, err := FindBestPrices(
 		am.exchangeClients,
 		symbol,
@@ -199,7 +212,7 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 		return
 	}
 
-	// Calcular o spread básico (pode ser negativo se não houver oportunidade)
+	// Calculate the basic spread (can be negative if there's no opportunity)
 	spread := 0.0
 	if lowestAsk.Price > 0 {
 		spread = (highestBid.Price - lowestAsk.Price) / lowestAsk.Price * 100
@@ -207,23 +220,23 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 
 	maxTradeSize := math.Min(lowestAsk.Amount, highestBid.Amount)
 
-	// Valores padrão
+	// Default values
 	netProfit := 0.0
 	potentialProfit := 0.0
 	liquidProfit := 0.0
 
-	// Criar uma configuração temporária apenas para este símbolo específico
+	// Create a temporary configuration only for this specific symbol
 	tempConfig := *am.config
 	tempConfig.Coins = []string{symbol}
 
-	// Agora tentamos encontrar oportunidades de arbitragem usando FindArbitrageOpportunities
+	// Now try to find arbitrage opportunities using FindArbitrageOpportunities
 	opportunities, _ := FindArbitrageOpportunities(am.exchangeClients, &tempConfig)
 
-	// Se encontramos oportunidades, usamos os dados dela (que já tem todos os cálculos feitos)
+	// If we find opportunities, use its data (which already has all calculations done)
 	if len(opportunities) > 0 {
 		opp := opportunities[0]
 
-		// Atualizamos os valores com os dados da oportunidade
+		// Update values with opportunity data
 		lowestAsk.Exchange = opp.BuyExchange
 		lowestAsk.Price = opp.BuyPrice
 		highestBid.Exchange = opp.SellExchange
@@ -233,13 +246,13 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 		maxTradeSize = opp.MaxTradeSize
 		potentialProfit = opp.PotentialProfit
 
-		// Calcular o liquid profit (específico desta função)
+		// Calculate liquid profit (specific to this function)
 		if spread != 0 {
 			liquidProfit = netProfit / spread
 		}
 	}
 
-	// Sempre enviar dados para o dashboard
+	// Always send data to the dashboard
 	am.dashboard.SendCoinData(ui.CoinData{
 		Symbol:          symbol,
 		BuyExchange:     lowestAsk.Exchange,
@@ -253,4 +266,14 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 		PotentialProfit: potentialProfit,
 		Timestamp:       time.Now(),
 	})
+}
+
+// getExchangeName returns a friendly name for an exchange by index
+func (am *ArbitrageMonitor) getExchangeName(index int) string {
+	if index == 0 {
+		return "Hyperliquid"
+	} else if index == 1 {
+		return "KuCoin"
+	}
+	return "unknown"
 }

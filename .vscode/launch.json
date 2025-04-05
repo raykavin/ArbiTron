@@ -10,7 +10,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}\\cmd\\arbibot\\main.go",
-            "console": "integratedTerminal"
+            "console": "externalTerminal"
         }
     ]
 }

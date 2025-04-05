@@ -3,21 +3,14 @@ package ui
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
 	"github.com/mum4k/termdash"
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/container"
-	"github.com/mum4k/termdash/container/grid"
-	"github.com/mum4k/termdash/linestyle"
 	"github.com/mum4k/termdash/terminal/tcell"
 	"github.com/mum4k/termdash/terminal/terminalapi"
-	"github.com/mum4k/termdash/widgets/barchart"
-	"github.com/mum4k/termdash/widgets/button"
-	"github.com/mum4k/termdash/widgets/linechart"
-	"github.com/mum4k/termdash/widgets/text"
 )
 
 // Constants for dashboard configuration
@@ -26,38 +19,13 @@ const (
 	maxHistorySize = 50
 )
 
-// ChartMode represents the current view mode of the line chart
-type ChartMode int
-
-const (
-	ModeAll ChartMode = iota
-	ModeSingle
-)
-
-// CoinData represents a single arbitrage opportunity data point
-type CoinData struct {
-	Timestamp       time.Time
-	Symbol          string
-	BuyExchange     string
-	SellExchange    string
-	BuyPrice        float64
-	SellPrice       float64
-	Profit          float64
-	Spread          float64
-	MaxTradeSize    float64
-	PotentialProfit float64
-	LiquidProfit    float64
-}
-
 // ArbitrageDashboard manages the UI and data for crypto arbitrage visualization
 type ArbitrageDashboard struct {
-	// UI widgets
-	coinWidgets  map[string]*text.Text
-	barChart     *barchart.BarChart
-	lineChart    *linechart.LineChart
-	chartButtons map[string]*button.Button
+	// UI components
+	widgets  *dashboardWidgets
+	layouter *dashboardLayouter
 
-	// Data channels - aumentado o buffer para reduzir bloqueios
+	// Data channels with increased buffer to reduce blocking
 	updateChan chan CoinData
 	closeChan  chan struct{}
 
@@ -69,11 +37,11 @@ type ArbitrageDashboard struct {
 	selectedCoin   string
 	mode           ChartMode
 
-	// Sincronização explícita para updates e redrawing
-	dataMu      sync.RWMutex // para proteção de dados
-	widgetMu    sync.Mutex   // para proteção de widgets
-	updating    bool         // sinaliza que uma atualização está em andamento
-	batchUpdate bool         // indica se estamos em modo de atualização em lote
+	// Synchronization for updates and redrawing
+	dataMu      sync.RWMutex // for data protection
+	widgetMu    sync.Mutex   // for widget protection
+	updating    bool         // signals that an update is in progress
+	batchUpdate bool         // indicates if we're in batch update mode
 }
 
 // NewArbitrageDashboard creates a new dashboard instance for the given coins
@@ -86,132 +54,54 @@ func NewArbitrageDashboard(coins []string) *ArbitrageDashboard {
 		cell.ColorYellow,
 	}
 
-	return &ArbitrageDashboard{
+	dashboard := &ArbitrageDashboard{
 		coins:          coins,
 		chartColors:    chartColors,
 		updateChan:     make(chan CoinData, 1000),
-		coinWidgets:    make(map[string]*text.Text),
-		chartButtons:   make(map[string]*button.Button),
 		closeChan:      make(chan struct{}),
 		spreadsHistory: make(map[string][]float64),
 		profits:        make(map[string]float64),
 		mode:           ModeAll,
 		batchUpdate:    false,
 	}
+
+	// Initialize widgets and layouter
+	dashboard.widgets = newDashboardWidgets(dashboard)
+	dashboard.layouter = newDashboardLayouter(dashboard)
+
+	return dashboard
 }
 
-// InitWidgets initializes all dashboard UI widgets
-func (ad *ArbitrageDashboard) InitWidgets() error {
-	if err := ad.initCoinWidgets(); err != nil {
-		return fmt.Errorf("failed to initialize coin widgets: %w", err)
-	}
-
-	if err := ad.initBarChart(); err != nil {
-		return fmt.Errorf("failed to initialize bar chart: %w", err)
-	}
-
-	if err := ad.initLineChart(); err != nil {
-		return fmt.Errorf("failed to initialize line chart: %w", err)
-	}
-
-	if err := ad.initChartButtons(); err != nil {
-		return fmt.Errorf("failed to initialize chart buttons: %w", err)
-	}
-
-	return nil
+// Init initializes all dashboard UI widgets
+func (ad *ArbitrageDashboard) Init() error {
+	return ad.widgets.initAllWidgets()
 }
 
-// initCoinWidgets initializes the text widgets for each coin
-func (ad *ArbitrageDashboard) initCoinWidgets() error {
-	for _, coin := range ad.coins {
-		widget, err := text.New(text.RollContent(), text.WrapAtWords())
-		if err != nil {
-			return fmt.Errorf("failed to create text widget for %s: %w", coin, err)
-		}
-		ad.coinWidgets[coin] = widget
-	}
-	return nil
+// StartBatchUpdates initiates a batch update mode for greater efficiency
+func (ad *ArbitrageDashboard) StartBatchUpdates() {
+	ad.widgetMu.Lock()
+	ad.batchUpdate = true
+	ad.widgetMu.Unlock()
 }
 
-// initBarChart initializes the profit bar chart
-func (ad *ArbitrageDashboard) initBarChart() error {
-	barChart, err := barchart.New(
-		barchart.BarColors(ad.chartColors),
-		barchart.ShowValues(),
-		barchart.Labels(ad.coins),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create bar chart: %w", err)
+// EndBatchUpdates terminates batch update mode and updates all charts
+func (ad *ArbitrageDashboard) EndBatchUpdates() {
+	ad.widgetMu.Lock()
+	defer ad.widgetMu.Unlock()
+
+	ad.batchUpdate = false
+
+	if !ad.updating {
+		ad.updating = true
+		ad.widgets.updateAllCharts()
+		ad.updating = false
 	}
-	ad.barChart = barChart
-	return nil
 }
 
-// initLineChart initializes the spread history line chart
-func (ad *ArbitrageDashboard) initLineChart() error {
-	lineChart, err := linechart.New(
-		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
-		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
-		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create line chart: %w", err)
-	}
-	ad.lineChart = lineChart
-	return nil
-}
-
-// initChartButtons initializes the chart control buttons
-func (ad *ArbitrageDashboard) initChartButtons() error {
-	// "All Coins" button
-	allButton, err := button.New("Todas as moedas", func() error {
-		ad.dataMu.Lock()
-		ad.mode = ModeAll
-		ad.dataMu.Unlock()
-
-		// Agenda uma atualização dos gráficos para os dados atuais
-		ad.scheduleUIUpdate()
-		return nil
-	},
-		button.WidthFor("Todas as moedas"),
-		button.Height(1),
-		button.FillColor(cell.ColorNumber(220)),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create All button: %w", err)
-	}
-	ad.chartButtons["All"] = allButton
-
-	// Individual coin buttons
-	for _, coin := range ad.coins {
-		coinCopy := coin // Create a copy to avoid closure capture issues
-		btn, err := button.New(coinCopy, func() error {
-			ad.dataMu.Lock()
-			ad.mode = ModeSingle
-			ad.selectedCoin = coinCopy
-			ad.dataMu.Unlock()
-
-			// Agenda uma atualização dos gráficos para os dados atuais
-			ad.scheduleUIUpdate()
-			return nil
-		},
-			button.WidthFor(coinCopy),
-			button.Height(1),
-			button.FillColor(cell.ColorNumber(196)),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create button for %s: %w", coin, err)
-		}
-		ad.chartButtons[coinCopy] = btn
-	}
-
-	return nil
-}
-
-// scheduleUIUpdate agenda uma atualização da UI para acontecer em um goroutine separado
+// scheduleUIUpdate schedules a UI update to happen in a separate goroutine
 func (ad *ArbitrageDashboard) scheduleUIUpdate() {
 	go func() {
-		// Pequena pausa para permitir agrupamento de updates
+		// Small pause to allow grouping of updates
 		time.Sleep(50 * time.Millisecond)
 
 		ad.dataMu.RLock()
@@ -224,181 +114,15 @@ func (ad *ArbitrageDashboard) scheduleUIUpdate() {
 			ad.updating = true
 			defer func() { ad.updating = false }()
 
-			ad.updateBarChart()
-			ad.updateLineChart()
+			ad.widgets.updateAllCharts()
 		}
 	}()
-}
-
-// processCoinUpdate handles new coin data updates with improved synchronization
-// processCoinUpdate handles new coin data updates with improved synchronization
-func (ad *ArbitrageDashboard) processCoinUpdate(coinData CoinData) {
-	ad.dataMu.Lock()
-	// Update internal data
-	ad.updateProfitData(coinData)
-	ad.updateSpreadHistory(coinData)
-	ad.dataMu.Unlock()
-
-	// Update widgets with clear locking pattern
-	ad.widgetMu.Lock()
-	ad.updateCoinWidget(coinData)
-	ad.widgetMu.Unlock()
-
-	// Schedule UI update after a short delay to batch updates
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		ad.widgetMu.Lock()
-		if !ad.updating {
-			ad.updating = true
-			ad.updateBarChart()
-			ad.updateLineChart()
-			ad.updating = false
-		}
-		ad.widgetMu.Unlock()
-	}()
-}
-
-// StartBatchUpdates inicia um modo de atualizações em lote para maior eficiência
-func (ad *ArbitrageDashboard) StartBatchUpdates() {
-	ad.widgetMu.Lock()
-	ad.batchUpdate = true
-	ad.widgetMu.Unlock()
-}
-
-// EndBatchUpdates termina o modo de atualizações em lote e atualiza todos os gráficos
-func (ad *ArbitrageDashboard) EndBatchUpdates() {
-	ad.widgetMu.Lock()
-	defer ad.widgetMu.Unlock()
-
-	ad.batchUpdate = false
-
-	if !ad.updating {
-		ad.updating = true
-		ad.updateBarChart()
-		ad.updateLineChart()
-		ad.updating = false
-	}
-}
-
-// updateCoinWidget updates the text widget for a specific coin
-func (ad *ArbitrageDashboard) updateCoinWidget(coinData CoinData) {
-	widget, exists := ad.coinWidgets[coinData.Symbol]
-	if !exists {
-		return
-	}
-
-	widgetText := fmt.Sprintf(`
-COMPRAR:
-Exchange:       %s
-Preço:          $%.7f
----------------------------------
-VENDER:
-Exchange:        %s
-Preço:           $%.7f
----------------------------------
-Spread:          %.7f%%
-Lucro Bruto:     %.7f%%
-Lucro Liquido:   %.7f%%
-Vol. Máximo:     %.6f %s
-Lucro Potencial: $%.2f
-Horário          %s
-`,
-		coinData.BuyExchange,
-		coinData.BuyPrice,
-		coinData.SellExchange,
-		coinData.SellPrice,
-		coinData.Spread,
-		coinData.Profit,
-		coinData.LiquidProfit,
-		coinData.MaxTradeSize,
-		coinData.Symbol,
-		coinData.PotentialProfit,
-		coinData.Timestamp.Format("15:04:05"),
-	)
-
-	widget.Reset()
-	widget.Write(widgetText)
-}
-
-// updateProfitData updates the profit data for a specific coin
-func (ad *ArbitrageDashboard) updateProfitData(coinData CoinData) {
-	ad.profits[coinData.Symbol] = 100
-}
-
-// updateSpreadHistory updates the spread history for a specific coin
-func (ad *ArbitrageDashboard) updateSpreadHistory(coinData CoinData) {
-	history := ad.spreadsHistory[coinData.Symbol]
-	if len(history) >= maxHistorySize {
-		history = history[1:]
-	}
-	ad.spreadsHistory[coinData.Symbol] = append(history, coinData.Spread)
-}
-
-// updateBarChart updates the bar chart with current profit data
-func (ad *ArbitrageDashboard) updateBarChart() {
-	barData := make([]int, len(ad.coins))
-	for i, coin := range ad.coins {
-		profit, exists := ad.profits[coin]
-		if exists {
-			barData[i] = int(math.Abs(profit) * 20000)
-		}
-	}
-	_ = ad.barChart.Values(barData, 1000)
-}
-
-// updateLineChart updates the line chart based on current mode
-func (ad *ArbitrageDashboard) updateLineChart() {
-	ad.lineChart.Series("", []float64{}, linechart.SeriesCellOpts(cell.FgColor(cell.ColorDefault)))
-
-	// Clears all coin series to ensure complete cleaning
-	for _, coin := range ad.coins {
-		ad.lineChart.Series(coin, []float64{}, linechart.SeriesCellOpts(cell.FgColor(cell.ColorDefault)))
-	}
-
-	switch ad.mode {
-	case ModeAll:
-		ad.renderAllCoinsChart()
-	case ModeSingle:
-		ad.renderSingleCoinChart()
-	}
-}
-
-// renderAllCoinsChart renders line chart with all coins
-func (ad *ArbitrageDashboard) renderAllCoinsChart() {
-	for i, coin := range ad.coins {
-		if spreads, ok := ad.spreadsHistory[coin]; ok && len(spreads) > 0 {
-			// Ignora erros de atualização
-			ad.lineChart.Series(coin,
-				spreads,
-				linechart.SeriesCellOpts(cell.FgColor(ad.chartColors[i%len(ad.chartColors)])),
-			)
-		}
-	}
-}
-
-// renderSingleCoinChart renders line chart with only the selected coin
-func (ad *ArbitrageDashboard) renderSingleCoinChart() {
-	if spreads, ok := ad.spreadsHistory[ad.selectedCoin]; ok && len(spreads) > 0 {
-		colorIdx := 0
-		for i, coin := range ad.coins {
-			if coin == ad.selectedCoin {
-				colorIdx = i
-				break
-			}
-		}
-
-		_ = ad.lineChart.Series(
-			ad.selectedCoin,
-			spreads,
-			linechart.SeriesCellOpts(cell.FgColor(ad.chartColors[colorIdx%len(ad.chartColors)])),
-		)
-	}
 }
 
 // StartUpdateListener starts the goroutine for processing coin updates
 func (ad *ArbitrageDashboard) StartUpdateListener(ctx context.Context) {
 	go func() {
-		// Buffer de atualização para evitar sobrecarga da UI
+		// Update buffer to avoid UI overload
 		updateBuffer := make([]CoinData, 0, 10)
 		updateTicker := time.NewTicker(200 * time.Millisecond)
 		defer updateTicker.Stop()
@@ -429,9 +153,44 @@ func (ad *ArbitrageDashboard) StartUpdateListener(ctx context.Context) {
 	}()
 }
 
-// Close shuts down the dashboard cleanly
-func (ad *ArbitrageDashboard) Close() {
-	close(ad.closeChan)
+// processCoinUpdate handles new coin data updates with improved synchronization
+func (ad *ArbitrageDashboard) processCoinUpdate(coinData CoinData) {
+	ad.dataMu.Lock()
+	// Update internal data
+	ad.updateProfitData(coinData)
+	ad.updateSpreadHistory(coinData)
+	ad.dataMu.Unlock()
+
+	// Update widgets with clear locking pattern
+	ad.widgetMu.Lock()
+	ad.widgets.updateCoinWidget(coinData)
+	ad.widgetMu.Unlock()
+
+	// Schedule UI update after a short delay to batch updates
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		ad.widgetMu.Lock()
+		if !ad.updating {
+			ad.updating = true
+			ad.widgets.updateAllCharts()
+			ad.updating = false
+		}
+		ad.widgetMu.Unlock()
+	}()
+}
+
+// updateProfitData updates the profit data for a specific coin
+func (ad *ArbitrageDashboard) updateProfitData(coinData CoinData) {
+	ad.profits[coinData.Symbol] = 100
+}
+
+// updateSpreadHistory updates the spread history for a specific coin
+func (ad *ArbitrageDashboard) updateSpreadHistory(coinData CoinData) {
+	history := ad.spreadsHistory[coinData.Symbol]
+	if len(history) >= maxHistorySize {
+		history = history[1:]
+	}
+	ad.spreadsHistory[coinData.Symbol] = append(history, coinData.Spread)
 }
 
 // SendCoinData sends coin data to the dashboard for processing
@@ -444,86 +203,9 @@ func (ad *ArbitrageDashboard) SendCoinData(data CoinData) {
 	}
 }
 
-// CreateLayout creates the grid layout for the dashboard
-func (ad *ArbitrageDashboard) CreateLayout() ([]container.Option, error) {
-	builder := grid.New()
-
-	// Create button elements for line chart
-	buttonElements := ad.createButtonElements()
-
-	builder.Add(
-		grid.RowHeightPerc(38,
-			ad.createCoinWidgetsRow()...,
-		),
-		grid.RowHeightPerc(62,
-			grid.ColWidthPerc(50,
-				grid.Widget(ad.barChart,
-					container.Border(linestyle.Light),
-					container.BorderTitle(" Lucros da arbitragem "),
-				),
-			),
-			grid.ColWidthPerc(50,
-				grid.RowHeightPerc(15,
-					buttonElements...,
-				),
-				grid.RowHeightPerc(82,
-					grid.Widget(ad.lineChart,
-						container.Border(linestyle.Light),
-						container.BorderTitle(" Histórico de spread "),
-					),
-				),
-			),
-		),
-	)
-
-	gridOpts, err := builder.Build()
-	if err != nil {
-		return nil, fmt.Errorf("failed to build grid layout: %w", err)
-	}
-	return gridOpts, nil
-}
-
-// createButtonElements creates the grid elements for chart buttons
-func (ad *ArbitrageDashboard) createButtonElements() []grid.Element {
-	var buttonElements []grid.Element
-
-	// Add "All" button
-	buttonElements = append(buttonElements,
-		grid.ColWidthPerc(20,
-			grid.Widget(ad.chartButtons["All"],
-				container.Border(linestyle.Light),
-			),
-		),
-	)
-
-	// Add coin buttons
-	for _, coin := range ad.coins {
-		buttonElements = append(buttonElements,
-			grid.ColWidthPerc(16,
-				grid.Widget(ad.chartButtons[coin],
-					container.Border(linestyle.Light),
-				),
-			),
-		)
-	}
-
-	return buttonElements
-}
-
-// createCoinWidgetsRow creates the grid elements for coin widgets
-func (ad *ArbitrageDashboard) createCoinWidgetsRow() []grid.Element {
-	var elements []grid.Element
-	for _, coin := range ad.coins {
-		elements = append(elements,
-			grid.ColWidthPerc(20,
-				grid.Widget(ad.coinWidgets[coin],
-					container.Border(linestyle.Light),
-					container.BorderTitle(fmt.Sprintf(" %s Arbitragem ", coin)),
-				),
-			),
-		)
-	}
-	return elements
+// Close shuts down the dashboard cleanly
+func (ad *ArbitrageDashboard) Close() {
+	close(ad.closeChan)
 }
 
 // RunDashboard starts and runs the dashboard terminal UI
@@ -534,7 +216,7 @@ func RunDashboard(ctx context.Context, ad *ArbitrageDashboard) error {
 	}
 	defer t.Close()
 
-	gridOpts, err := ad.CreateLayout()
+	gridOpts, err := ad.layouter.CreateLayout()
 	if err != nil {
 		return fmt.Errorf("failed to create layout: %w", err)
 	}

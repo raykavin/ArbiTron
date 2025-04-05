@@ -32,7 +32,7 @@ func main() {
 
 	// Create and initialize the arbitrage dashboard
 	dashboard := ui.NewArbitrageDashboard(cfg.Coins)
-	if err := dashboard.InitWidgets(); err != nil {
+	if err := dashboard.Init(); err != nil {
 		log.Fatalf("Failed to initialize widgets: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func setupSignalHandler(cancel context.CancelFunc) {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		log.Println("Encerrando...")
+		log.Println("Shutdownting...")
 		cancel()
 	}()
 }

@@ -9,8 +9,11 @@ import (
 	"notlelouch/ArbiBot/internal/exchange"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+var strBuilder strings.Builder
 
 // ArbitrageOpportunity represents a complete arbitrage opportunity
 type ArbitrageOpportunity struct {
@@ -26,15 +29,15 @@ type ArbitrageOpportunity struct {
 	Timestamp       time.Time
 }
 
-// LogPositiveOpportunity registra oportunidades de arbitragem lucrativas em um arquivo de log
+// LogPositiveOpportunity logs profitable arbitrage opportunities to a log file
 func LogPositiveOpportunity(opportunity ArbitrageOpportunity) error {
-	// Criar diretório logs se não existir
+	// Create logs directory if it doesn't exist
 	logDir := "logs"
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	// Criar ou abrir arquivo de log (um arquivo por dia)
+	// Create or open log file (one file per day)
 	today := time.Now().Format("2006-01-02")
 	logFile := filepath.Join(logDir, fmt.Sprintf("positive_arbitrage_%s.log", today))
 
@@ -44,32 +47,23 @@ func LogPositiveOpportunity(opportunity ArbitrageOpportunity) error {
 	}
 	defer file.Close()
 
-	// Criar um logger
+	// Create a logger
 	logger := log.New(file, "", log.LstdFlags)
 
-	// Formatar e gravar a oportunidade
-	logEntry := fmt.Sprintf(
-		"OPORTUNIDADE LUCRATIVA!\n"+
-			"Symbol: %s\n"+
-			"Buy: %s @ %.8f\n"+
-			"Sell: %s @ %.8f\n"+
-			"Spread: %.6f%%\n"+
-			"Lucro Líquido: %.6f%%\n"+
-			"Volume Máximo: %.8f\n"+
-			"Lucro Potencial: $%.2f\n"+
-			"Timestamp: %s\n"+
-			"-------------------------------------\n",
-		opportunity.Symbol,
-		opportunity.BuyExchange, opportunity.BuyPrice,
-		opportunity.SellExchange, opportunity.SellPrice,
-		opportunity.Spread,
-		opportunity.NetProfit,
-		opportunity.MaxTradeSize,
-		opportunity.PotentialProfit,
-		opportunity.Timestamp.Format("2006-01-02 15:04:05"),
-	)
+	fmt.Fprintln(&strBuilder, "PROFITABLE OPPORTUNITY!")
+	fmt.Fprintf(&strBuilder, "Symbol:           %s\n", opportunity.Symbol)
+	fmt.Fprintf(&strBuilder, "Buy:              %s @ %.8f\n", opportunity.BuyExchange, opportunity.BuyPrice)
+	fmt.Fprintf(&strBuilder, "Sell:             %s @ %.8f\n", opportunity.SellExchange, opportunity.SellPrice)
+	fmt.Fprintf(&strBuilder, "Spread:           %.6f%%\n", opportunity.Spread)
+	fmt.Fprintf(&strBuilder, "Net Profit:       %.6f%%\n", opportunity.NetProfit)
+	fmt.Fprintf(&strBuilder, "Maximum Volume:   %.8f\n", opportunity.MaxTradeSize)
+	fmt.Fprintf(&strBuilder, "Potential Profit: $%.2f\n", opportunity.PotentialProfit)
+	fmt.Fprintf(&strBuilder, "Timestamp:        %s\n", opportunity.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Fprintln(&strBuilder, "-------------------------------------")
 
-	logger.Println(logEntry)
+	logger.Print(strBuilder.String())
+	strBuilder.Reset()
+
 	return nil
 }
 
@@ -84,28 +78,24 @@ func FindBestPrices(exchanges []exchange.Exchange, coin string, depth int, maxSt
 			continue
 		}
 
-		// Check if order book is stale
+		// Skip stale data
 		if time.Since(orderBook.Timestamp) > maxStaleDuration {
-			continue // Skip stale data
+			continue
 		}
 
 		// Extract bids and asks up to configured depth
-		maxDepth := min(depth, len(orderBook.Bids))
-		for i := range maxDepth {
-			if i < len(orderBook.Bids) {
-				bestBids = append(bestBids, orderBook.Bids[i])
-			}
+		maxBidDepth := min(depth, len(orderBook.Bids))
+		for i := range maxBidDepth {
+			bestBids = append(bestBids, orderBook.Bids[i])
 		}
 
-		maxDepth = min(depth, len(orderBook.Asks))
-		for i := range maxDepth {
-			if i < len(orderBook.Asks) {
-				bestAsks = append(bestAsks, orderBook.Asks[i])
-			}
+		maxAskDepth := min(depth, len(orderBook.Asks))
+		for i := range maxAskDepth {
+			bestAsks = append(bestAsks, orderBook.Asks[i])
 		}
 	}
 
-	// Find the highest bid and lowest ask across all the different exchanges
+	// Check if we have any valid orders
 	if len(bestBids) == 0 || len(bestAsks) == 0 {
 		return exchange.Order{}, exchange.Order{}, fmt.Errorf("no bids or asks found")
 	}
@@ -113,11 +103,12 @@ func FindBestPrices(exchanges []exchange.Exchange, coin string, depth int, maxSt
 	highestBid = bestBids[0]
 	lowestAsk = bestAsks[0]
 
-	// Eliminating the same exchange arbitrage entirely
-	foundValidPair := false
+	// Find best prices across different exchanges
+	// foundValidPair := false
 
 	for _, bid := range bestBids {
 		for _, ask := range bestAsks {
+			// Skip same-exchange opportunities
 			if bid.Exchange == ask.Exchange {
 				continue
 			}
@@ -125,20 +116,21 @@ func FindBestPrices(exchanges []exchange.Exchange, coin string, depth int, maxSt
 			// Update highest bid if higher and from different exchange than current lowest ask
 			if bid.Exchange != lowestAsk.Exchange && bid.Price > highestBid.Price {
 				highestBid = bid
-				foundValidPair = true
+				// foundValidPair = true
 			}
 
 			// Update lowest ask if lower and from different exchange than current highest bid
 			if ask.Exchange != highestBid.Exchange && ask.Price < lowestAsk.Price {
 				lowestAsk = ask
-				foundValidPair = true
+				// foundValidPair = true
 			}
 		}
 	}
 
-	if !foundValidPair {
-		// return exchange.Order{}, exchange.Order{}, fmt.Errorf("no valid cross-exchange opportunities found")
-	}
+	// Validation check is commented out to match original behavior
+	// if !foundValidPair {
+	//     return exchange.Order{}, exchange.Order{}, fmt.Errorf("no valid cross-exchange opportunities found")
+	// }
 
 	return lowestAsk, highestBid, nil
 }
@@ -160,24 +152,25 @@ func FindArbitrageOpportunities(exchanges []exchange.Exchange, cfg *config.Confi
 
 		// Calculate profit metrics
 		netProfit := CalculateNetProfitPercentage(
+			cfg,
 			lowestAsk.Price,
 			highestBid.Price,
-			cfg.TradeFees,
 			lowestAsk.Exchange,
 			highestBid.Exchange,
 		)
 
 		// Skip if profit below threshold
-		if netProfit <= cfg.ProfitThreshold {
+		if netProfit <= cfg.MinProfitPercentage {
 			continue
 		}
 
-		spread := (highestBid.Price - lowestAsk.Price) / lowestAsk.Price * 100
+		// Calculate additional metrics
+		spread := CalculateSpreadPercentage(lowestAsk.Price, highestBid.Price)
 		maxTradeSize := CalculateMaxTradeSize(lowestAsk, highestBid)
-		potentialProfit := (maxTradeSize * lowestAsk.Price) * (netProfit / 100)
+		potentialProfit := CalculatePotentialProfit(lowestAsk.Price, maxTradeSize, netProfit)
 
 		// Skip if potential profit too small
-		if potentialProfit < cfg.MinProfitUSD {
+		if potentialProfit < cfg.MinProfitAmount {
 			continue
 		}
 
@@ -195,7 +188,7 @@ func FindArbitrageOpportunities(exchanges []exchange.Exchange, cfg *config.Confi
 			Timestamp:       time.Now(),
 		}
 
-		// Log
+		// Log profitable opportunities
 		if netProfit > 0 {
 			LogPositiveOpportunity(opportunity)
 		}
@@ -206,29 +199,32 @@ func FindArbitrageOpportunities(exchanges []exchange.Exchange, cfg *config.Confi
 	return opportunities, nil
 }
 
+// CalculateSpreadPercentage calculates the spread as a percentage
+func CalculateSpreadPercentage(askPrice, bidPrice float64) float64 {
+	return (bidPrice - askPrice) / askPrice * 100
+}
+
+// CalculatePotentialProfit calculates the potential profit in USD
+func CalculatePotentialProfit(askPrice, maxTradeSize, netProfitPercentage float64) float64 {
+	return (maxTradeSize * askPrice) * (netProfitPercentage / 100)
+}
+
 // CalculateMaxTradeSize returns the maximum possible trade size based on available liquidity
 func CalculateMaxTradeSize(lowestAsk, highestBid exchange.Order) float64 {
 	return math.Min(lowestAsk.Amount, highestBid.Amount)
 }
 
 // CalculateNetProfitPercentage calculates the net profit percentage considering fees
-func CalculateNetProfitPercentage(ask, bid float64, fees map[string]float64, buyExchange, sellExchange string) float64 {
-	// Use default fees if not specified
-	buyFee := 0.1  // default 0.1%
-	sellFee := 0.1 // default 0.1%
-
-	// Get fees from map if available
-	if fee, exists := fees[buyExchange]; exists {
-		buyFee = fee
-	}
-	if fee, exists := fees[sellExchange]; exists {
-		sellFee = fee
-	}
+func CalculateNetProfitPercentage(cfg *config.Config, ask, bid float64, buyExchange, sellExchange string) float64 {
+	// Get exchange-specific fees if available
+	buyFee := cfg.GetFee(buyExchange)
+	sellFee := cfg.GetFee(sellExchange)
 
 	// Convert percentage to decimal
 	buyFeeDecimal := buyFee / 100.0
 	sellFeeDecimal := sellFee / 100.0
 
+	// Calculate net profit ratio
 	netProfit := ((bid * (1 - sellFeeDecimal)) / (ask * (1 + buyFeeDecimal))) - 1
 
 	// Convert to percentage
