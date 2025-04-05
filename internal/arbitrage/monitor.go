@@ -11,8 +11,6 @@ import (
 
 	"github.com/raykavin/ArbiTron/internal/config"
 	"github.com/raykavin/ArbiTron/internal/exchange"
-	"github.com/raykavin/ArbiTron/internal/exchange/hyperliquid"
-	"github.com/raykavin/ArbiTron/internal/exchange/kucoin"
 	"github.com/raykavin/ArbiTron/internal/ui"
 )
 
@@ -24,19 +22,15 @@ type ArbitrageMonitor struct {
 }
 
 // NewArbitrageMonitor creates and initializes a new ArbitrageMonitor
-func NewArbitrageMonitor(dashboard *ui.ArbitrageDashboard, cfg *config.Config) (*ArbitrageMonitor, error) {
-	tokenResp, err := kucoin.GetToken("", "", "", false)
-	if err != nil {
-		return nil, err
+func NewArbitrageMonitor(dashboard *ui.ArbitrageDashboard, cfg *config.Config, exchanges ...exchange.Exchange) (*ArbitrageMonitor, error) {
+	if len(exchanges) == 0 {
+		return nil, fmt.Errorf("one or more exchanges is required for monitoring")
 	}
 
-	hyperliquidClient := hyperliquid.NewHyperliquidWS(cfg.UseMainnet)
-	kucoinClient := kucoin.NewKuCoinWS(tokenResp)
-
 	return &ArbitrageMonitor{
+		exchangeClients: exchanges,
 		dashboard:       dashboard,
 		config:          cfg,
-		exchangeClients: []exchange.Exchange{hyperliquidClient, kucoinClient},
 	}, nil
 }
 
