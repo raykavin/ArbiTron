@@ -2,7 +2,7 @@ min_spread_percentage: 0.5
 min_profit_percentage: 0.3
 min_profit_amount: 1
 use_mainnet: true
-order_book_depth: 0.2
+order_book_depth: 1
 check_interval: 50ms
 max_stale_duration: 10s
 update_ui_interval: 5ms

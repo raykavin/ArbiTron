@@ -11,12 +11,12 @@ import (
 
 	"github.com/raykavin/ArbiTron/internal/arbitrage"
 	"github.com/raykavin/ArbiTron/internal/config"
-	"github.com/raykavin/ArbiTron/internal/exchange"
-	"github.com/raykavin/ArbiTron/internal/exchange/binance"
-	"github.com/raykavin/ArbiTron/internal/exchange/hyperliquid"
-	"github.com/raykavin/ArbiTron/internal/exchange/kucoin"
-	"github.com/raykavin/ArbiTron/internal/exchange/okx"
 	"github.com/raykavin/ArbiTron/internal/ui"
+	"github.com/raykavin/ArbiTron/pkg/exchange"
+	"github.com/raykavin/ArbiTron/pkg/exchange/binance"
+	"github.com/raykavin/ArbiTron/pkg/exchange/hyperliquid"
+	"github.com/raykavin/ArbiTron/pkg/exchange/kucoin"
+	"github.com/raykavin/ArbiTron/pkg/exchange/okx"
 )
 
 func main() {
@@ -67,9 +67,9 @@ func main() {
 	go monitor.Start(ctx)
 
 	// Run the terminal dashboard
-	// if err := ui.RunDashboard(ctx, dashboard, cfg.UpdateUIInterval); err != nil {
-	// 	log.Fatalf("Failed to run dashboard: %v", err)
-	// }
+	if err := ui.RunDashboard(ctx, dashboard, cfg.UpdateUIInterval); err != nil {
+		log.Fatalf("Failed to run dashboard: %v", err)
+	}
 
 	// Wait for program to exit
 	<-ctx.Done()
