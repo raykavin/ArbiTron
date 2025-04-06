@@ -12,8 +12,10 @@ import (
 	"github.com/raykavin/ArbiTron/internal/arbitrage"
 	"github.com/raykavin/ArbiTron/internal/config"
 	"github.com/raykavin/ArbiTron/internal/exchange"
+	"github.com/raykavin/ArbiTron/internal/exchange/binance"
 	"github.com/raykavin/ArbiTron/internal/exchange/hyperliquid"
 	"github.com/raykavin/ArbiTron/internal/exchange/kucoin"
+	"github.com/raykavin/ArbiTron/internal/exchange/okx"
 	"github.com/raykavin/ArbiTron/internal/ui"
 )
 
@@ -35,7 +37,7 @@ func main() {
 	// Setup exchanges for monitoring
 	exchanges, err := setupExchanges(cfg)
 	if err != nil {
-		log.Fatalf(err.Error())
+		log.Fatal(err.Error())
 	}
 
 	// Handle graceful shutdown
@@ -78,14 +80,20 @@ func setupExchanges(cfg *config.Config) ([]exchange.Exchange, error) {
 
 	// Setup Hyperliquid exchange
 	hyperliquidEx := setupHyperliquidExchange(cfg.UseMainnet)
-	exchanges = append(exchanges, hyperliquidEx)
+
+	// Setup Binance exchange
+	binanceEx := setupBinanceExchange()
+
+	// Setup OKX exchange
+	OKXEx := setupOKXExchange()
 
 	// Setup KuCoin exchange
 	kuCoinEx, err := setupKuCoinExchange()
 	if err != nil {
 		return nil, fmt.Errorf("unable to setup KuCoin exchange: %v", err)
 	}
-	exchanges = append(exchanges, kuCoinEx)
+
+	exchanges = append(exchanges, hyperliquidEx, kuCoinEx, binanceEx, OKXEx)
 
 	return exchanges, nil
 }
@@ -103,6 +111,14 @@ func setupKuCoinExchange() (*kucoin.KuCoinWS, error) {
 // setupHyperliquidExchange initializes a new Hyperliquid WebSocket client.
 func setupHyperliquidExchange(useMainnet bool) *hyperliquid.HyperliquidWS {
 	return hyperliquid.NewHyperliquidWS(useMainnet)
+}
+
+func setupBinanceExchange() *binance.BinanceWS {
+	return binance.NewBinanceWS()
+}
+
+func setupOKXExchange() *okx.OKXWS {
+	return okx.NewOKXWS()
 }
 
 // setupSignalHandler configures system signal handling for graceful shutdown

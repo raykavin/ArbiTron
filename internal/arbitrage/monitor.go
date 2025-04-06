@@ -54,8 +54,8 @@ func (am *ArbitrageMonitor) Connect(ctx context.Context) error {
 
 // connectToExchanges connects to all configured exchanges
 func (am *ArbitrageMonitor) connectToExchanges(ctx context.Context) error {
-	for i, client := range am.exchangeClients {
-		exchangeName := am.getExchangeName(i)
+	for _, client := range am.exchangeClients {
+		exchangeName := client.GetName()
 
 		log.Printf("Connecting to %s...", exchangeName)
 		if err := client.Connect(ctx); err != nil {
@@ -69,8 +69,8 @@ func (am *ArbitrageMonitor) connectToExchanges(ctx context.Context) error {
 // subscribeToCoins subscribes to order book updates for all configured coins
 func (am *ArbitrageMonitor) subscribeToCoins() error {
 	for _, coin := range am.config.Coins {
-		for i, client := range am.exchangeClients {
-			exchangeName := am.getExchangeName(i)
+		for _, client := range am.exchangeClients {
+			exchangeName := client.GetName()
 
 			log.Printf("Subscribing to %s on %s...", coin, exchangeName)
 			if err := client.SubscribeToOrderBook(coin); err != nil {
@@ -107,25 +107,46 @@ func (am *ArbitrageMonitor) logInitialOpportunities(opportunities []ArbitrageOpp
 	}
 }
 
-// verifyDataForEachCoin checks if we have data for each configured coin
+// verifyDataForEachCoin checks if we have data for each configured coin concurrently
 func (am *ArbitrageMonitor) verifyDataForEachCoin() error {
-	// To ensure we have data for all coins, we check each one individually
-	for _, coin := range am.config.Coins {
-		lowestAsk, highestBid, err := FindBestPrices(
-			am.exchangeClients,
-			coin,
-			am.config.OrderBookDepth,
-			am.config.MaxStaleDuration,
-		)
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(am.config.Coins))
 
-		if err == nil && lowestAsk.Price > 0 && highestBid.Price > 0 {
-			log.Printf("Initial data received for %s: Best ask: %.8f (%s), Best bid: %.8f (%s)",
-				coin, lowestAsk.Price, lowestAsk.Exchange, highestBid.Price, highestBid.Exchange)
-		} else {
-			log.Printf("Warning: No initial data yet for %s: %v", coin, err)
-		}
+	// Verify each coin concurrently
+	for _, coin := range am.config.Coins {
+		wg.Add(1)
+		go func(symbol string) {
+			defer wg.Done()
+
+			lowestAsk, highestBid, err := FindBestPrices(
+				am.exchangeClients,
+				symbol,
+				am.config.OrderBookDepth,
+				am.config.MaxStaleDuration,
+			)
+
+			if err == nil && lowestAsk.Price > 0 && highestBid.Price > 0 {
+				log.Printf("Initial data received for %s: Best ask: %.8f (%s), Best bid: %.8f (%s)",
+					symbol, lowestAsk.Price, lowestAsk.Exchange, highestBid.Price, highestBid.Exchange)
+			} else {
+				log.Printf("Warning: No initial data yet for %s: %v", symbol, err)
+				// Optionally send error to channel if you want to fail fast
+				// errChan <- fmt.Errorf("no initial data for %s: %w", symbol, err)
+			}
+		}(coin)
 	}
-	return nil
+
+	// Wait for all verifications to complete
+	wg.Wait()
+	close(errChan)
+
+	// Check if any errors occurred
+	select {
+	case err := <-errChan:
+		return err
+	default:
+		return nil
+	}
 }
 
 // Start begins monitoring for arbitrage opportunities
@@ -261,14 +282,4 @@ func (am *ArbitrageMonitor) checkArbitrageOpportunity(symbol string) {
 		PotentialProfit: potentialProfit,
 		Timestamp:       time.Now(),
 	})
-}
-
-// getExchangeName returns a friendly name for an exchange by index
-func (am *ArbitrageMonitor) getExchangeName(index int) string {
-	if index == 0 {
-		return "Hyperliquid"
-	} else if index == 1 {
-		return "KuCoin"
-	}
-	return "unknown"
 }

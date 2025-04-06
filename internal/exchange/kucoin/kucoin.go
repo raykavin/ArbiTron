@@ -128,7 +128,7 @@ func (k *KuCoinWS) SubscribeToOrderBook(coin string) error {
 	k.subscriptions = append(k.subscriptions, topic)
 	k.mu.Unlock()
 
-	log.Printf("Successfully subscribed to KuCoin level2Depth5 for %s", coin)
+	// log.Printf("Successfully subscribed to KuCoin level2Depth5 for %s", coin)
 	return nil
 }
 

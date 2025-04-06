@@ -140,37 +140,41 @@ func FindBestPrices(exchanges []exchange.Exchange, coin string, depth int, maxSt
 func FindArbitrageOpportunities(exchanges []exchange.Exchange, cfg *config.Config) ([]ArbitrageOpportunity, error) {
 	var opportunities []ArbitrageOpportunity
 
+	// Pre-compute all needed order books at once
+	orderBooks := make(map[string]map[exchange.Exchange]*exchange.OrderBook)
+
 	for _, coin := range cfg.Coins {
-		for _, buyEx := range exchanges {
-			for _, sellEx := range exchanges {
+		orderBooks[coin] = make(map[exchange.Exchange]*exchange.OrderBook)
+
+		for _, ex := range exchanges {
+			book, err := ex.GetOrderBook(coin)
+			if err == nil && len(book.Asks) > 0 && len(book.Bids) > 0 {
+				orderBooks[coin][ex] = book
+			}
+		}
+
+		// For each coin, analyze all valid exchange combinations
+		for buyEx, buyBook := range orderBooks[coin] {
+			lowestAsk := buyBook.Asks[0]
+
+			for sellEx, sellBook := range orderBooks[coin] {
+				// Skip same exchange
 				if buyEx == sellEx {
-					continue // evita mesma corretora
-				}
-
-				// Obter books
-				buyBook, err := buyEx.GetOrderBook(coin)
-				if err != nil || len(buyBook.Asks) == 0 {
 					continue
 				}
 
-				sellBook, err := sellEx.GetOrderBook(coin)
-				if err != nil || len(sellBook.Bids) == 0 {
-					continue
-				}
-
-				lowestAsk := buyBook.Asks[0]
 				highestBid := sellBook.Bids[0]
 
+				// Check if arbitrage potential exists
 				if highestBid.Price <= lowestAsk.Price {
 					continue
 				}
 
 				netProfit := CalculateNetProfitPercentage(
-					cfg,
 					lowestAsk.Price,
 					highestBid.Price,
-					buyEx.GetName(),
-					sellEx.GetName(),
+					cfg.GetFee(buyEx.GetName()),
+					cfg.GetFee(sellEx.GetName()),
 				)
 
 				if netProfit <= cfg.MinProfitPercentage {
@@ -223,11 +227,7 @@ func CalculateMaxTradeSize(lowestAsk, highestBid exchange.Order) float64 {
 }
 
 // CalculateNetProfitPercentage calculates the net profit percentage considering fees
-func CalculateNetProfitPercentage(cfg *config.Config, ask, bid float64, buyExchange, sellExchange string) float64 {
-	// Get exchange-specific fees if available
-	buyFee := cfg.GetFee(buyExchange)
-	sellFee := cfg.GetFee(sellExchange)
-
+func CalculateNetProfitPercentage(ask, bid, buyFee, sellFee float64) float64 {
 	// Convert percentage to decimal
 	buyFeeDecimal := buyFee / 100.0
 	sellFeeDecimal := sellFee / 100.0
