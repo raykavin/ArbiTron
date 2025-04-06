@@ -89,12 +89,16 @@ func (dl *dashboardLayouter) createButtonElements() []grid.Element {
 // createCoinWidgetsRow creates the grid elements for coin widgets
 func (dl *dashboardLayouter) createCoinWidgetsRow() []grid.Element {
 	var elements []grid.Element
-	for _, coin := range dl.dashboard.coins {
+	for i, coin := range dl.dashboard.coins {
+		coinColor := dl.dashboard.chartColors[i%len(dl.dashboard.chartColors)]
+
 		elements = append(elements,
 			grid.ColWidthPerc(20,
 				grid.Widget(dl.dashboard.widgets.coinWidgets[coin],
 					container.Border(linestyle.Light),
 					container.BorderTitle(fmt.Sprintf(" %s Arbitrage ", coin)),
+					container.BorderColor(coinColor),
+					container.FocusedColor(coinColor),
 				),
 			),
 		)

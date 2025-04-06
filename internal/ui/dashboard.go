@@ -14,10 +14,7 @@ import (
 )
 
 // Constants for dashboard configuration
-const (
-	redrawInterval = 250 * time.Millisecond
-	maxHistorySize = 50
-)
+const maxHistorySize = 50
 
 // ArbitrageDashboard manages the UI and data for crypto arbitrage visualization
 type ArbitrageDashboard struct {
@@ -209,7 +206,7 @@ func (ad *ArbitrageDashboard) Close() {
 }
 
 // RunDashboard starts and runs the dashboard terminal UI
-func RunDashboard(ctx context.Context, ad *ArbitrageDashboard) error {
+func RunDashboard(ctx context.Context, ad *ArbitrageDashboard, updateUIInterval time.Duration) error {
 	t, err := tcell.New(tcell.ColorMode(terminalapi.ColorMode256))
 	if err != nil {
 		return fmt.Errorf("failed to initialize terminal: %w", err)
@@ -231,5 +228,5 @@ func RunDashboard(ctx context.Context, ad *ArbitrageDashboard) error {
 	defer cancel()
 	defer ad.Close()
 
-	return termdash.Run(dashCtx, t, c, termdash.RedrawInterval(redrawInterval))
+	return termdash.Run(dashCtx, t, c, termdash.RedrawInterval(updateUIInterval))
 }

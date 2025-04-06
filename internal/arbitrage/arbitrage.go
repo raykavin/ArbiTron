@@ -60,7 +60,7 @@ func LogPositiveOpportunity(opportunity ArbitrageOpportunity) error {
 	fmt.Fprintf(&strBuilder, "Maximum Volume:   %.8f\n", opportunity.MaxTradeSize)
 	fmt.Fprintf(&strBuilder, "Potential Profit: $%.2f\n", opportunity.PotentialProfit)
 	fmt.Fprintf(&strBuilder, "Timestamp:        %s\n", opportunity.Timestamp.Format("2006-01-02 15:04:05"))
-	fmt.Fprintln(&strBuilder, "-------------------------------------")
+	fmt.Fprintln(&strBuilder, strings.Repeat("-", 70))
 
 	logger.Print(strBuilder.String())
 	strBuilder.Reset()
@@ -69,7 +69,12 @@ func LogPositiveOpportunity(opportunity ArbitrageOpportunity) error {
 }
 
 // FindBestPrices finds the lowest ask and highest bid across multiple exchanges.
-func FindBestPrices(exchanges []exchange.Exchange, coin string, depth int, maxStaleDuration time.Duration) (lowestAsk, highestBid exchange.Order, err error) {
+func FindBestPrices(
+	exchanges []exchange.Exchange,
+	coin string,
+	depth int,
+	maxStaleDuration time.Duration,
+) (lowestAsk, highestBid exchange.Order, err error) {
 	var bestBids, bestAsks []exchange.Order
 
 	// Fetch order books from all exchanges

@@ -20,8 +20,9 @@ import (
 )
 
 func main() {
+	var configPath = flag.String("config", "config.yaml", "Path to configuration file")
+
 	// Parse command line flags
-	configPath := flag.String("config", "config.json", "Path to configuration file")
 	flag.Parse()
 
 	// Load configuration
@@ -66,9 +67,9 @@ func main() {
 	go monitor.Start(ctx)
 
 	// Run the terminal dashboard
-	if err := ui.RunDashboard(ctx, dashboard); err != nil {
-		log.Fatalf("Failed to run dashboard: %v", err)
-	}
+	// if err := ui.RunDashboard(ctx, dashboard, cfg.UpdateUIInterval); err != nil {
+	// 	log.Fatalf("Failed to run dashboard: %v", err)
+	// }
 
 	// Wait for program to exit
 	<-ctx.Done()

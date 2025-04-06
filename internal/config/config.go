@@ -2,48 +2,55 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds the application configuration
 type Config struct {
-	MinSpreadPercentage float64            `json:"min_spread_percentage"` // Minimum spread percentage
-	MinProfitPercentage float64            `json:"min_profit_percentage"` // Minimum profit percentage after fees
-	MinProfitAmount     float64            `json:"min_profit_amount"`     // Minimum profit in USD
-	UseMainnet          bool               `json:"use_mainnet"`           // Use mainnet or testnet
-	OrderBookDepth      int                `json:"order_book_depth"`      // Depth of order book to consider
-	Coins               []string           `json:"coins"`                 // List of coins to monitor
-	TradeFees           map[string]float64 `json:"trade_fees"`            // Fee by exchange
-	CheckInterval       time.Duration      `json:"check_interval"`        // How often to check for arbitrage
-	MaxStaleDuration    time.Duration      `json:"max_stale_duration"`    // Maximum age of order book data
-	UpdateUIInterval    time.Duration      `json:"update_ui_interval"`    // Dashboard update interval
-	InitialWaitTime     time.Duration      `json:"initial_wait_time"`     // Initial wait time after connecting
+	MinSpreadPercentage float64            `yaml:"min_spread_percentage"` // Minimum spread percentage
+	MinProfitPercentage float64            `yaml:"min_profit_percentage"` // Minimum profit percentage after fees
+	MinProfitAmount     float64            `yaml:"min_profit_amount"`     // Minimum profit in USD
+	UseMainnet          bool               `yaml:"use_mainnet"`           // Use mainnet or testnet
+	OrderBookDepth      int                `yaml:"order_book_depth"`      // Depth of order book to consider
+	Coins               []string           `yaml:"coins"`                 // List of coins to monitor
+	TradeFees           map[string]float64 `yaml:"trade_fees"`            // Fee by exchange
+	CheckInterval       time.Duration      `yaml:"check_interval"`        // How often to check for arbitrage
+	MaxStaleDuration    time.Duration      `yaml:"max_stale_duration"`    // Maximum age of order book data
+	UpdateUIInterval    time.Duration      `yaml:"update_ui_interval"`    // Dashboard update interval
+	InitialWaitTime     time.Duration      `yaml:"initial_wait_time"`     // Initial wait time after connecting
 }
 
 // DefaultConfig returns a default configuration with sensible values
 func DefaultConfig() *Config {
 	return &Config{
-		Coins:               []string{"LINK", "ATOM", "BTC", "AVAX", "ADA"},
+		UseMainnet:          true,
 		MinSpreadPercentage: 0.5, // 0.5% minimum spread
 		MinProfitPercentage: 0.3, // 0.3% minimum profit after fees
 		MinProfitAmount:     5.0, // $5 minimum profit
+		CheckInterval:       100 * time.Millisecond,
+		MaxStaleDuration:    500 * time.Millisecond,
+		UpdateUIInterval:    50 * time.Millisecond,
+		InitialWaitTime:     2 * time.Second,
+		OrderBookDepth:      5,
 		TradeFees: map[string]float64{
 			"Hyperliquid": 0.1, // 0.1% fee
 			"KuCoin":      0.1, // 0.1% fee
 		},
-		CheckInterval:    100 * time.Millisecond,
-		MaxStaleDuration: 500 * time.Millisecond,
-		UpdateUIInterval: 50 * time.Millisecond,
-		InitialWaitTime:  2 * time.Second,
-		UseMainnet:       true,
-		OrderBookDepth:   5,
+		Coins: []string{
+			"LINK",
+			"ATOM",
+			"BTC",
+			"AVAX",
+			"ADA",
+		},
 	}
 }
 
-// LoadFromFile loads configuration from a JSON file
+// LoadFromFile loads configuration from a YAML file
 // If the file doesn't exist, creates a default config file
 func LoadFromFile(filePath string) (*Config, error) {
 	// Start with default config
@@ -72,16 +79,16 @@ func loadExistingConfigFile(config *Config, filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	if err := json.Unmarshal(data, config); err != nil {
+	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
 	return config, nil
 }
 
-// SaveToFile saves the configuration to a JSON file
+// SaveToFile saves the configuration to a YAML file
 func (c *Config) SaveToFile(filePath string) error {
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
