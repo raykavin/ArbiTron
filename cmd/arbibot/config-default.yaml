@@ -1,0 +1,21 @@
+min_spread_percentage: 0.2
+min_profit_percentage: 0.15
+min_profit_amount: 0.5
+use_mainnet: false
+order_book_depth: 10
+max_stale_duration: 10s
+check_interval: 500ms
+update_ui_interval: 300ms
+coins:
+  - "SOL"
+  - "ATOM"
+  - "BTC"
+  - "APT"
+  - "ETH"
+trade_fees:
+    Hyperliquid: 0.2
+    KuCoin: 0.2
+    Binance: 0.2
+    OKX: 0.2
+    Bybit: 0.2
+    MEXC: 0.2

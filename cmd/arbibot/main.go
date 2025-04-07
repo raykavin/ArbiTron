@@ -12,123 +12,74 @@ import (
 	"github.com/raykavin/ArbiTron/internal/arbitrage"
 	"github.com/raykavin/ArbiTron/internal/config"
 	"github.com/raykavin/ArbiTron/internal/ui"
-	"github.com/raykavin/ArbiTron/pkg/exchange"
-	"github.com/raykavin/ArbiTron/pkg/exchange/binance"
-	"github.com/raykavin/ArbiTron/pkg/exchange/hyperliquid"
-	"github.com/raykavin/ArbiTron/pkg/exchange/kucoin"
-	"github.com/raykavin/ArbiTron/pkg/exchange/okx"
+	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 func main() {
-	var configPath = flag.String("config", "config.yaml", "Path to configuration file")
-
-	// Parse command line flags
+	configPath := flag.String("config", "config.yaml", "Path to configuration file")
 	flag.Parse()
 
-	// Load configuration
-	cfg, err := config.LoadFromFile(*configPath)
+	if err := run(*configPath); err != nil {
+		log.Fatalf("Application error: %v", err)
+	}
+}
+
+func run(configPath string) error {
+	log.Println("Please wait a moment, the application is starting...")
+
+	cfg, err := config.LoadFromFile(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Create a context that can be canceled
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Setup exchanges for monitoring
-	exchanges, err := setupExchanges(cfg)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-
-	// Handle graceful shutdown
 	setupSignalHandler(cancel)
 
-	// Create and initialize the arbitrage dashboard
-	dashboard := ui.NewArbitrageDashboard(cfg.Coins)
-	if err := dashboard.Init(); err != nil {
-		log.Fatalf("Failed to initialize widgets: %v", err)
-	}
-
-	// Start update listener for the dashboard
-	dashboard.StartUpdateListener(ctx)
-
-	// Create and start the arbitrage monitor
-	monitor, err := arbitrage.NewArbitrageMonitor(dashboard, cfg, exchanges...)
+	dashboard, uiLogger, err := setupUI(ctx, cfg)
 	if err != nil {
-		log.Fatalf("Failed to create arbitrage monitor: %v", err)
+		return fmt.Errorf("UI initialization failed: %w", err)
 	}
 
-	if err := monitor.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to exchanges: %v", err)
+	exchanges, err := arbitrage.SetupExchanges(ctx, cfg, uiLogger)
+	if err != nil {
+		return fmt.Errorf("exchange setup failed: %w", err)
 	}
 
-	// Run arbitrage monitoring in parallel with terminal dashboard
+	monitor, err := arbitrage.NewArbitrageMonitor(ctx, cfg, dashboard, uiLogger, exchanges...)
+	if err != nil {
+		return fmt.Errorf("failed to create monitor: %w", err)
+	}
+
 	go monitor.Start(ctx)
 
-	// Run the terminal dashboard
 	if err := ui.RunDashboard(ctx, dashboard, cfg.UpdateUIInterval); err != nil {
-		log.Fatalf("Failed to run dashboard: %v", err)
+		return fmt.Errorf("dashboard error: %w", err)
 	}
 
-	// Wait for program to exit
 	<-ctx.Done()
+	return nil
 }
 
-// setupExchanges initializes and returns a list of configured exchange instances.
-func setupExchanges(cfg *config.Config) ([]exchange.Exchange, error) {
-	var exchanges []exchange.Exchange
-
-	// Setup Hyperliquid exchange
-	hyperliquidEx := setupHyperliquidExchange(cfg.UseMainnet)
-
-	// Setup Binance exchange
-	binanceEx := setupBinanceExchange()
-
-	// Setup OKX exchange
-	OKXEx := setupOKXExchange()
-
-	// Setup KuCoin exchange
-	kuCoinEx, err := setupKuCoinExchange()
-	if err != nil {
-		return nil, fmt.Errorf("unable to setup KuCoin exchange: %v", err)
+func setupUI(ctx context.Context, cfg *config.Config) (*ui.ArbitrageDashboard, logger.Logger, error) {
+	dashboard := ui.NewArbitrageDashboard(cfg)
+	if err := dashboard.Init(); err != nil {
+		return nil, nil, err
 	}
 
-	exchanges = append(exchanges, hyperliquidEx, kuCoinEx, binanceEx, OKXEx)
-
-	return exchanges, nil
+	dashboard.StartUpdateListener(ctx)
+	uiLogger := ui.NewUILogger(dashboard.GetLoggerWidget())
+	return dashboard, uiLogger, nil
 }
 
-// setupKuCoinExchange initializes a new KuCoin WebSocket client using an authentication token.
-func setupKuCoinExchange() (*kucoin.KuCoinWS, error) {
-	tokenResp, err := kucoin.GetToken("", "", "", false)
-	if err != nil {
-		return nil, err
-	}
-
-	return kucoin.NewKuCoinWS(tokenResp), nil
-}
-
-// setupHyperliquidExchange initializes a new Hyperliquid WebSocket client.
-func setupHyperliquidExchange(useMainnet bool) *hyperliquid.HyperliquidWS {
-	return hyperliquid.NewHyperliquidWS(useMainnet)
-}
-
-func setupBinanceExchange() *binance.BinanceWS {
-	return binance.NewBinanceWS()
-}
-
-func setupOKXExchange() *okx.OKXWS {
-	return okx.NewOKXWS()
-}
-
-// setupSignalHandler configures system signal handling for graceful shutdown
 func setupSignalHandler(cancel context.CancelFunc) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
 		<-sigChan
-		log.Println("Shutdownting...")
+		log.Println("Initiating graceful shutdown...")
 		cancel()
 	}()
 }
