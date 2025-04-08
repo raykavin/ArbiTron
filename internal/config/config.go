@@ -16,60 +16,25 @@ type Config struct {
 	MinProfitAmount     float64            `yaml:"min_profit_amount"`     // Minimum profit in USD
 	UseMainnet          bool               `yaml:"use_mainnet"`           // Use mainnet or testnet
 	OrderBookDepth      int                `yaml:"order_book_depth"`      // Depth of order book to consider
-	Coins               []string           `yaml:"coins"`                 // List of coins to monitor
-	TradeFees           map[string]float64 `yaml:"trade_fees"`            // Fee by exchange
-	CheckInterval       time.Duration      `yaml:"check_interval"`        // How often to check for arbitrage
-	MaxStaleDuration    time.Duration      `yaml:"max_stale_duration"`    // Maximum age of order book data
-	UpdateUIInterval    time.Duration      `yaml:"update_ui_interval"`    // Dashboard update interval
-	InitialWaitTime     time.Duration      `yaml:"initial_wait_time"`     // Initial wait time after connecting
-}
-
-// DefaultConfig returns a default configuration with sensible values
-func DefaultConfig() *Config {
-	return &Config{
-		UseMainnet:          true,
-		MinSpreadPercentage: 0.5, // 0.5% minimum spread
-		MinProfitPercentage: 0.3, // 0.3% minimum profit after fees
-		MinProfitAmount:     5.0, // $5 minimum profit
-		CheckInterval:       100 * time.Millisecond,
-		MaxStaleDuration:    500 * time.Millisecond,
-		UpdateUIInterval:    50 * time.Millisecond,
-		InitialWaitTime:     2 * time.Second,
-		OrderBookDepth:      5,
-		TradeFees: map[string]float64{
-			"Hyperliquid": 0.1, // 0.1% fee
-			"KuCoin":      0.1, // 0.1% fee
-		},
-		Coins: []string{
-			"LINK",
-			"ATOM",
-			"BTC",
-			"AVAX",
-			"ADA",
-		},
-	}
+	QuotedAsset         string             `yaml:"quoted_asset"`
+	Coins               []string           `yaml:"coins"`              // List of coins to monitor
+	TradeFees           map[string]float64 `yaml:"trade_fees"`         // Fee by exchange
+	CheckInterval       time.Duration      `yaml:"check_interval"`     // How often to check for arbitrage
+	MaxStaleDuration    time.Duration      `yaml:"max_stale_duration"` // Maximum age of order book data
+	UpdateUIInterval    time.Duration      `yaml:"update_ui_interval"` // Dashboard update interval
 }
 
 // LoadFromFile loads configuration from a YAML file
 // If the file doesn't exist, creates a default config file
 func LoadFromFile(filePath string) (*Config, error) {
-	// Start with default config
-	config := DefaultConfig()
+	config := &Config{}
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return createDefaultConfigFile(config, filePath)
+		return nil, err
 	}
 
 	return loadExistingConfigFile(config, filePath)
-}
-
-// createDefaultConfigFile creates a default config file if none exists
-func createDefaultConfigFile(config *Config, filePath string) (*Config, error) {
-	if err := config.SaveToFile(filePath); err != nil {
-		return nil, fmt.Errorf("failed to create default config: %w", err)
-	}
-	return config, nil
 }
 
 // loadExistingConfigFile loads and parses an existing config file
@@ -84,16 +49,6 @@ func loadExistingConfigFile(config *Config, filePath string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// SaveToFile saves the configuration to a YAML file
-func (c *Config) SaveToFile(filePath string) error {
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	return os.WriteFile(filePath, data, 0644)
 }
 
 // GetFee returns the trading fee for a specific exchange

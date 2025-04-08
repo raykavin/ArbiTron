@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/raykavin/ArbiTron/internal/config"
-	"github.com/raykavin/ArbiTron/internal/exchange"
+	"github.com/raykavin/ArbiTron/pkg/exchange"
 	"github.com/stretchr/testify/assert"
 )
 

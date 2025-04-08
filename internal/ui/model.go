@@ -25,4 +25,6 @@ type CoinData struct {
 	MaxTradeSize    float64
 	PotentialProfit float64
 	LiquidProfit    float64
+	Profitable      bool
+	FlashUntil      time.Time
 }

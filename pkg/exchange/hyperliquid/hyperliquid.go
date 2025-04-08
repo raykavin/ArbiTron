@@ -5,20 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/raykavin/ArbiTron/internal/exchange"
-
-	"github.com/gorilla/websocket"
+	"github.com/raykavin/ArbiTron/pkg/exchange"
+	"github.com/raykavin/ArbiTron/pkg/http/websocket"
+	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 const (
-	wsHandshakeTimeout = 15 * time.Second
-	staleDuration      = 2 * time.Second
-
 	// Channel types
 	channelL2Book = "l2Book"
 
@@ -26,8 +22,8 @@ const (
 	subscriptionL2Book = "l2Book"
 
 	// WebSocket URLs
-	testnetWSURL = "wss://api.hyperliquid-testnet.xyz/ws"
-	mainnetWSURL = "wss://api.hyperliquid.xyz/ws"
+	testnetURL = "wss://api.hyperliquid-testnet.xyz/ws"
+	mainnetURL = "wss://api.hyperliquid.xyz/ws"
 )
 
 // WsResponse represents the WebSocket response
@@ -76,70 +72,58 @@ type WsBook struct {
 
 // OrderBookData stores an order book with its timestamp
 type OrderBookData struct {
-	// Timestamp time.Time
 	Book exchange.OrderBook
 }
 
-// HyperliquidWS handles WebSocket communication with Hyperliquid
-type HyperliquidWS struct {
-	url        string
-	conn       *websocket.Conn
-	handlers   map[string]func([]byte)
-	orderBooks map[string]*OrderBookData
-	mu         sync.RWMutex
-	ctx        context.Context
-	cancel     context.CancelFunc
+// HyperliquidExchange handles WebSocket communication with Hyperliquid
+type HyperliquidExchange struct {
+	socket       websocket.Client
+	ctx          context.Context
+	url          string
+	orderBooks   map[string]*OrderBookData
+	maxStaleData time.Duration
+	mu           sync.RWMutex
+	logger       logger.Logger
+	isMainnet    bool
 }
 
 // NewHyperliquidWS creates a new Hyperliquid WebSocket client
-func NewHyperliquidWS(mainnet bool) *HyperliquidWS {
-	url := testnetWSURL
+func New(ctx context.Context, mainnet bool, websocketClient websocket.Client, maxStaleData time.Duration, logger logger.Logger) (
+	*HyperliquidExchange,
+	error,
+) {
+	url := testnetURL
 	if mainnet {
-		url = mainnetWSURL
+		url = mainnetURL
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	return &HyperliquidWS{
-		url:        url,
-		handlers:   make(map[string]func([]byte)),
-		orderBooks: make(map[string]*OrderBookData),
-		ctx:        ctx,
-		cancel:     cancel,
+	hyperliquid := &HyperliquidExchange{
+		url:          url,
+		ctx:          ctx,
+		socket:       websocketClient,
+		logger:       logger,
+		maxStaleData: maxStaleData,
+		orderBooks:   make(map[string]*OrderBookData),
+		isMainnet:    mainnet,
 	}
+
+	return hyperliquid, hyperliquid.connect()
 }
 
-func (h *HyperliquidWS) GetName() string {
+func (h *HyperliquidExchange) GetName() string {
 	return "Hyperliquid"
 }
 
-// Connect establishes a WebSocket connection to Hyperliquid
-func (h *HyperliquidWS) Connect(ctx context.Context) error {
-	dialer := websocket.Dialer{
-		HandshakeTimeout: wsHandshakeTimeout,
-	}
-
-	conn, _, err := dialer.DialContext(ctx, h.url, nil)
-	if err != nil {
-		return fmt.Errorf("websocket connection failed: %w", err)
-	}
-
-	h.conn = conn
-	go h.handleMessages(ctx)
-	return nil
-}
-
 // Close closes the WebSocket connection and stops all goroutines
-func (h *HyperliquidWS) Close() {
-	h.cancel()
-	if h.conn != nil {
-		h.conn.Close()
+func (h *HyperliquidExchange) Close() {
+	if h.socket != nil && h.socket.IsConnected() {
+		h.socket.Close()
 	}
 }
 
 // SubscribeToOrderBook subscribes to order book updates for a specific coin
-func (h *HyperliquidWS) SubscribeToOrderBook(coin string) error {
-	if h.conn == nil {
+func (h *HyperliquidExchange) SubscribeToOrderBook(coin string) error {
+	if h.socket == nil || !h.socket.IsConnected() {
 		return fmt.Errorf("websocket not connected")
 	}
 
@@ -156,15 +140,19 @@ func (h *HyperliquidWS) SubscribeToOrderBook(coin string) error {
 
 	// Initialize the order book for this coin
 	h.orderBooks[coin] = &OrderBookData{
-		// Timestamp: time.Time{},
 		Book: exchange.OrderBook{},
 	}
 
-	return h.conn.WriteJSON(subscription)
+	subscriptionJSON, err := json.Marshal(subscription)
+	if err != nil {
+		return fmt.Errorf("error marshaling subscription: %w", err)
+	}
+
+	return h.socket.SendText(string(subscriptionJSON))
 }
 
 // GetOrderBook retrieves the current order book for a coin
-func (h *HyperliquidWS) GetOrderBook(coin string) (*exchange.OrderBook, error) {
+func (h *HyperliquidExchange) GetOrderBook(coin string) (*exchange.OrderBook, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -174,7 +162,7 @@ func (h *HyperliquidWS) GetOrderBook(coin string) (*exchange.OrderBook, error) {
 	}
 
 	// Check if data is stale
-	if time.Since(orderBookData.Book.Timestamp) > staleDuration {
+	if time.Since(orderBookData.Book.Timestamp) > h.maxStaleData {
 		return nil, fmt.Errorf("stale order book for %s (last updated %s ago)",
 			coin, time.Since(orderBookData.Book.Timestamp).String())
 	}
@@ -182,41 +170,85 @@ func (h *HyperliquidWS) GetOrderBook(coin string) (*exchange.OrderBook, error) {
 	return &orderBookData.Book, nil
 }
 
-// handleMessages processes incoming WebSocket messages
-func (h *HyperliquidWS) handleMessages(ctx context.Context) {
-	for {
+// connect establishes a WebSocket connection to Hyperliquid
+func (h *HyperliquidExchange) connect() error {
+	// Set up event handlers
+	h.setupEventHandlers()
+
+	// Establish connection
+	var connErr error
+	h.socket.On(websocket.EventConnectError, func(event websocket.Event) {
+		if err, ok := event.Data.(error); ok && err != nil {
+			connErr = err
+			return
+		}
+
+		connErr = fmt.Errorf("establish connection with hyperliquid unknown error")
+	})
+
+	h.socket.Connect(h.url)
+
+	return connErr
+}
+
+// setupEventHandlers configures all WebSocket event handlers
+func (h *HyperliquidExchange) setupEventHandlers() {
+	// Handle connection events
+	h.socket.On(websocket.EventConnected, func(event websocket.Event) {
+		h.logger.Infof("Connected to Hyperliquid WebSocket")
+	})
+
+	h.socket.On(websocket.EventConnectError, func(event websocket.Event) {
+		err := event.Data.(error)
+		h.logger.Errorf("Failed to connect to Hyperliquid WebSocket: %v", err)
+	})
+
+	h.socket.On(websocket.EventDisconnected, func(event websocket.Event) {
+		var errMsg string
+		if err, ok := event.Data.(error); ok && err != nil {
+			errMsg = err.Error()
+		} else {
+			errMsg = "unknown reason"
+		}
+		h.logger.Warnf("Disconnected from Hyperliquid WebSocket: %s", errMsg)
+
+		// Try to reconnect if the context is still valid
 		select {
-		case <-ctx.Done():
+		case <-h.ctx.Done():
 			return
 		default:
-			_, message, err := h.conn.ReadMessage()
-			if err != nil {
-				log.Printf("read error: %v", err)
-				// Try to reconnect
-				h.attemptReconnect(ctx)
-				return
-			}
-
-			var response WsResponse
-			if err := json.Unmarshal(message, &response); err != nil {
-				log.Printf("unmarshal error: %v", err)
-				continue
-			}
-
-			switch response.Channel {
-			case channelL2Book:
-				h.handleOrderBookUpdate(response.Data)
-			default:
-			}
+			go h.attemptReconnect()
 		}
+	})
+
+	// Handle text messages
+	h.socket.On(websocket.EventTextMessage, func(event websocket.Event) {
+		message := event.Data.(string)
+		h.handleMessage([]byte(message))
+	})
+}
+
+// handleMessage processes incoming WebSocket messages
+func (h *HyperliquidExchange) handleMessage(message []byte) {
+	var response WsResponse
+	if err := json.Unmarshal(message, &response); err != nil {
+		h.logger.Errorf("Unmarshal error: %v", err)
+		return
+	}
+
+	switch response.Channel {
+	case channelL2Book:
+		h.handleOrderBookUpdate(response.Data)
+	default:
+		// Ignore other message types for now
 	}
 }
 
 // handleOrderBookUpdate processes order book updates
-func (h *HyperliquidWS) handleOrderBookUpdate(data []byte) {
+func (h *HyperliquidExchange) handleOrderBookUpdate(data []byte) {
 	var orderbook WsBook
 	if err := json.Unmarshal(data, &orderbook); err != nil {
-		log.Printf("l2Book unmarshal error: %v", err)
+		h.logger.Errorf("l2Book unmarshal error: %v", err)
 		return
 	}
 
@@ -227,7 +259,6 @@ func (h *HyperliquidWS) handleOrderBookUpdate(data []byte) {
 	if _, exists := h.orderBooks[coin]; !exists {
 		h.orderBooks[coin] = &OrderBookData{
 			Book: exchange.OrderBook{},
-			// Timestamp: time.Time{},
 		}
 	}
 
@@ -238,7 +269,7 @@ func (h *HyperliquidWS) handleOrderBookUpdate(data []byte) {
 }
 
 // processOrderBookLevels converts the raw order book data to our internal format
-func (h *HyperliquidWS) processOrderBookLevels(orderbook WsBook) exchange.OrderBook {
+func (h *HyperliquidExchange) processOrderBookLevels(orderbook WsBook) exchange.OrderBook {
 	newBook := exchange.OrderBook{
 		Bids: make([]exchange.Order, 0, len(orderbook.Levels[1])),
 		Asks: make([]exchange.Order, 0, len(orderbook.Levels[0])),
@@ -248,13 +279,13 @@ func (h *HyperliquidWS) processOrderBookLevels(orderbook WsBook) exchange.OrderB
 	for _, level := range orderbook.Levels[1] {
 		price, err := strconv.ParseFloat(level.Px, 64)
 		if err != nil {
-			log.Printf("Error parsing bid price %s: %v", level.Px, err)
+			h.logger.Errorf("Error parsing bid price %s: %v", level.Px, err)
 			continue
 		}
 
 		amount, err := strconv.ParseFloat(level.Sz, 64)
 		if err != nil {
-			log.Printf("Error parsing bid size %s: %v", level.Sz, err)
+			h.logger.Errorf("Error parsing bid size %s: %v", level.Sz, err)
 			continue
 		}
 
@@ -269,13 +300,13 @@ func (h *HyperliquidWS) processOrderBookLevels(orderbook WsBook) exchange.OrderB
 	for _, level := range orderbook.Levels[0] {
 		price, err := strconv.ParseFloat(level.Px, 64)
 		if err != nil {
-			log.Printf("Error parsing ask price %s: %v", level.Px, err)
+			h.logger.Errorf("Error parsing ask price %s: %v", level.Px, err)
 			continue
 		}
 
 		amount, err := strconv.ParseFloat(level.Sz, 64)
 		if err != nil {
-			log.Printf("Error parsing ask size %s: %v", level.Sz, err)
+			h.logger.Errorf("Error parsing ask size %s: %v", level.Sz, err)
 			continue
 		}
 
@@ -290,21 +321,21 @@ func (h *HyperliquidWS) processOrderBookLevels(orderbook WsBook) exchange.OrderB
 }
 
 // attemptReconnect tries to reestablish the WebSocket connection
-func (h *HyperliquidWS) attemptReconnect(ctx context.Context) {
+func (h *HyperliquidExchange) attemptReconnect() {
 	maxRetries := 5
 	backoff := 1 * time.Second
 
-	for retry := range maxRetries {
-		log.Printf("Attempting to reconnect to Hyperliquid WebSocket (attempt %d/%d)", retry+1, maxRetries)
+	for retry := 0; retry < maxRetries; retry++ {
+		h.logger.Warnf("Attempting to reconnect to Hyperliquid WebSocket (attempt %d/%d)", retry+1, maxRetries)
 
 		time.Sleep(backoff)
 
 		// Exponential backoff
 		backoff *= 2
 
-		err := h.Connect(ctx)
+		err := h.connect()
 		if err == nil {
-			log.Printf("Successfully reconnected to Hyperliquid WebSocket")
+			h.logger.Infof("Successfully reconnected to Hyperliquid WebSocket")
 
 			// Resubscribe to all previous order books
 			h.mu.RLock()
@@ -316,15 +347,15 @@ func (h *HyperliquidWS) attemptReconnect(ctx context.Context) {
 
 			for _, coin := range coins {
 				if err := h.SubscribeToOrderBook(coin); err != nil {
-					log.Printf("Failed to resubscribe to %s: %v", coin, err)
+					h.logger.Errorf("Failed to resubscribe to %s: %v", coin, err)
 				}
 			}
 
 			return
 		}
 
-		log.Printf("Failed to reconnect: %v", err)
+		h.logger.Errorf("Failed to reconnect: %v", err)
 	}
 
-	log.Printf("Failed to reconnect after %d attempts", maxRetries)
+	h.logger.Errorf("Failed to reconnect after %d attempts", maxRetries)
 }

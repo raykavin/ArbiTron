@@ -2,15 +2,13 @@
 package exchange
 
 import (
-	"context"
 	"time"
 )
 
 type Exchange interface {
-	Connect(ctx context.Context) error
+	GetName() string
 	SubscribeToOrderBook(symbol string) error
 	GetOrderBook(symbol string) (*OrderBook, error)
-	GetName() string
 }
 
 type OrderBook struct {
