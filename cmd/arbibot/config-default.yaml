@@ -1,11 +1,12 @@
 min_spread_percentage: 0.2
-min_profit_percentage: 0.15
-min_profit_amount: 0.5
+min_profit_percentage: 0.0001
+min_profit_amount: 0.0001
 use_mainnet: false
-order_book_depth: 10
+order_book_depth: 50
 max_stale_duration: 10s
-check_interval: 500ms
-update_ui_interval: 300ms
+check_interval: 50ms
+update_ui_interval: 10ms
+quoted_asset: "USDT"
 coins:
   - "SOL"
   - "ATOM"
@@ -13,9 +14,9 @@ coins:
   - "APT"
   - "ETH"
 trade_fees:
-    Hyperliquid: 0.2
-    KuCoin: 0.2
-    Binance: 0.2
-    OKX: 0.2
-    Bybit: 0.2
-    MEXC: 0.2
+    Hyperliquid: 2
+    KuCoin: 2
+    Binance: 2
+    OKX: 2
+    Bybit: 2
+    MEXC: 2
