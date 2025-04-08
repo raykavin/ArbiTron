@@ -12,7 +12,6 @@ import (
 	"github.com/raykavin/ArbiTron/internal/arbitrage"
 	"github.com/raykavin/ArbiTron/internal/config"
 	"github.com/raykavin/ArbiTron/internal/ui"
-	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 func main() {
@@ -62,7 +61,7 @@ func run(configPath string) error {
 	return nil
 }
 
-func setupUI(ctx context.Context, cfg *config.Config) (*ui.ArbitrageDashboard, logger.Logger, error) {
+func setupUI(ctx context.Context, cfg *config.Config) (*ui.ArbitrageDashboard, ui.Logger, error) {
 	dashboard := ui.NewArbitrageDashboard(cfg)
 	if err := dashboard.Init(); err != nil {
 		return nil, nil, err

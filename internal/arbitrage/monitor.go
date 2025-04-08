@@ -11,21 +11,20 @@ import (
 	"github.com/raykavin/ArbiTron/internal/config"
 	"github.com/raykavin/ArbiTron/internal/ui"
 	"github.com/raykavin/ArbiTron/pkg/exchange"
-	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 // ArbitrageMonitor handles the monitoring of arbitrage opportunities
 // It manages exchange connections and coordinates opportunity detection
 type ArbitrageMonitor struct {
 	ctx             context.Context
-	logger          logger.Logger
+	logger          ui.Logger
 	dashboard       *ui.ArbitrageDashboard // UI dashboard to display opportunities
 	config          *config.Config         // System configuration
 	exchangeClients []exchange.Exchange    // Connected exchange APIs
 }
 
 // NewArbitrageMonitor creates and initializes a new ArbitrageMonitor
-func NewArbitrageMonitor(ctx context.Context, cfg *config.Config, dashboard *ui.ArbitrageDashboard, logger logger.Logger, exchanges ...exchange.Exchange) (
+func NewArbitrageMonitor(ctx context.Context, cfg *config.Config, dashboard *ui.ArbitrageDashboard, logger ui.Logger, exchanges ...exchange.Exchange) (
 	*ArbitrageMonitor,
 	error,
 ) {

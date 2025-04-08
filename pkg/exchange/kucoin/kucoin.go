@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/raykavin/ArbiTron/internal/ui"
 	"github.com/raykavin/ArbiTron/pkg/exchange"
 	"github.com/raykavin/ArbiTron/pkg/http/websocket"
-	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 type WsOrderBookData struct {
@@ -44,7 +44,7 @@ type KuCoinExchange struct {
 	pingInterval time.Duration
 	maxStaleData time.Duration
 	mu           sync.RWMutex
-	logger       logger.Logger
+	logger       ui.Logger
 	apiKey       string
 	apiSecret    string
 	passphrase   string
@@ -52,7 +52,7 @@ type KuCoinExchange struct {
 }
 
 // New creates a new KuCoin WebSocket client
-func New(ctx context.Context, websocketClient websocket.Client, apiKey, apiSecret, passphrase string, isPrivate bool, maxStaleData time.Duration, logger logger.Logger) (
+func New(ctx context.Context, websocketClient websocket.Client, apiKey, apiSecret, passphrase string, isPrivate bool, maxStaleData time.Duration, logger ui.Logger) (
 	*KuCoinExchange,
 	error,
 ) {

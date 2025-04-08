@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/raykavin/ArbiTron/internal/ui"
 	"github.com/raykavin/ArbiTron/pkg/exchange"
 	"github.com/raykavin/ArbiTron/pkg/http/websocket"
-	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 const okxWSURL = "wss://ws.okx.com:8443/ws/v5/public"
@@ -25,7 +25,7 @@ type OKXExchange struct {
 	orderBooks   map[string]*OrderBookData
 	maxStaleData time.Duration
 	mu           sync.RWMutex
-	logger       logger.Logger
+	logger       ui.Logger
 }
 
 // OrderBookData stores an order book with its timestamp
@@ -58,7 +58,7 @@ type WsOrderBookResponse struct {
 }
 
 // New creates a new instance of OKX WebSocket client
-func New(ctx context.Context, websocketClient websocket.Client, maxStaleData time.Duration, quotedAsset string, logger logger.Logger) (
+func New(ctx context.Context, websocketClient websocket.Client, maxStaleData time.Duration, quotedAsset string, logger ui.Logger) (
 	*OKXExchange,
 	error,
 ) {

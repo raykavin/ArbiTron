@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/raykavin/ArbiTron/internal/ui"
 	"github.com/raykavin/ArbiTron/pkg/exchange"
 	"github.com/raykavin/ArbiTron/pkg/http/websocket"
-	"github.com/raykavin/ArbiTron/pkg/logger"
 )
 
 const (
@@ -55,12 +55,12 @@ type MexcExchange struct {
 	orderBooks   map[string]*OrderBookData
 	maxStaleData time.Duration
 	mu           sync.RWMutex
-	logger       logger.Logger
+	logger       ui.Logger
 	nextID       int
 }
 
 // New creates a new MEXC WebSocket client
-func New(ctx context.Context, websocketClient websocket.Client, maxStaleData time.Duration, quotedAsset string, logger logger.Logger) (
+func New(ctx context.Context, websocketClient websocket.Client, maxStaleData time.Duration, quotedAsset string, logger ui.Logger) (
 	*MexcExchange,
 	error,
 ) {
